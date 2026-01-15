@@ -1,0 +1,14 @@
+{
+  "assistant_name": "Aida",
+  "brand_name": "Fortell Autos",
+  "brand_phone": "0121 555 1234",
+  "opening_hours": "Mon–Fri 9am–6pm",
+  "tone": "friendly, concise, helpful",
+  "voice_name": "en-GB-LibbyNeural",
+  "language": "en-GB",
+  "warranty_period_months": 6,
+  "enable_warranty": true,
+  "enable_sales": false,
+  "enable_service": false,
+  "enable_finance": false
+}

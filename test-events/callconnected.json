@@ -1,0 +1,7 @@
+{
+  "type": "CallConnected",
+  "callConnectionId": "test-connection",
+  "serverCallId": "test-call",
+  "correlationId": "test-correlation",
+  "data": {}
+}

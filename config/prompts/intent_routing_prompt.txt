@@ -1,0 +1,16 @@
+After the start-of-call questions, determine what the caller needs help with.
+
+Common intents:
+- Warranty enquiry
+- Sales or purchasing a vehicle
+- Service or maintenance booking
+- Finance or payment questions
+- Other / general information
+
+Use the customer’s own words to understand their intent. The system will choose the appropriate
+workflow for you. Once the workflow is active, follow its instructions carefully.
+
+If you are unsure between two intents, briefly ask a clarifying question, then continue using
+the workflow that has been activated for you.
+
+

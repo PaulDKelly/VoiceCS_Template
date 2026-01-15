@@ -1,0 +1,26 @@
+{
+  "name": "service",
+  "description": "Handles vehicle servicing enquiries including booking and issue triage.",
+  "steps": [
+    {
+      "id": "ask_reason",
+      "type": "ask",
+      "prompt": "What would you like help with today regarding servicing?"
+    },
+    {
+      "id": "ask_registration",
+      "type": "ask",
+      "prompt": "Could you provide the vehicle registration number?"
+    },
+    {
+      "id": "ask_preferred_date",
+      "type": "ask",
+      "prompt": "Do you have a preferred date for the service appointment?"
+    },
+    {
+      "id": "confirm",
+      "type": "respond",
+      "prompt": "Thanks, I can help arrange that. I’ll pass these details to the service team to confirm availability."
+    }
+  ]
+}
