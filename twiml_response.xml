@@ -1,0 +1,11 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+    <Connect>
+        <Stream url="wss://app-voice-agent.bluefield-9f0e7247.uksouth.azurecontainerapps.io/api/audio-twilio?client_id=autonova&industry=automotive">
+            <Parameter name="phone_number" value="Unknown" />
+            <Parameter name="client_id" value="autonova" />
+            <Parameter name="industry" value="automotive" />
+        </Stream>
+    </Connect>
+</Response>
+

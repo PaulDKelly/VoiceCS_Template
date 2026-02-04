@@ -1,0 +1,80 @@
+from datetime import datetime
+from dateutil import parser
+from shared_code.utils.session import load_session, save_session
+from shared_code.utils.config_loader import load_merged_config
+
+
+def handle_warranty(session_id: str, text: str) -> dict:
+    session = load_session(session_id)
+    config = load_merged_config(session.get("client_id"), session.get("industry"))
+
+    # Step 1 — Ask purchase date if not known
+    if "purchase_date" not in session:
+        # Try to parse this turn as a date
+        try:
+            parsed = parser.parse(text, fuzzy=True)
+            session["purchase_date"] = parsed.date().isoformat()
+            save_session(session_id, session)
+        except Exception:
+            return _result(
+                "Do you know roughly when the vehicle was purchased?",
+                session,
+                config,
+            )
+
+    # Step 2 — Evaluate warranty status
+    purchase_date = session.get("purchase_date")
+    warranty_months = config.get("warranty_period_months", 36)
+    outcome = config.get("warranty_outcome", "redirect")  # redirect | capture_details
+
+    status = _evaluate_warranty_status(purchase_date, warranty_months)
+
+    if status == "out_of_warranty":
+        if outcome == "redirect":
+            # No more details, polite redirect + “anything else?”
+            session["awaiting_intent"] = True
+            save_session(session_id, session)
+
+            return _result(
+                "Thanks for that. It looks like the vehicle is outside the manufacturer warranty. "
+                "You may want to contact an independent garage or service centre who can help further. "
+                "Is there anything else I can help you with today?",
+                session,
+                config,
+            )
+
+        if outcome == "capture_details":
+            # Continue collecting details for human follow‑up
+            return _result(
+                "Thanks for that. Although the vehicle is outside warranty, I can still take some details. "
+                "Could you describe the issue you're experiencing?",
+                session,
+                config,
+            )
+
+    # In warranty → continue with issue capture
+    return _result(
+        "Thanks. It looks like the vehicle is still within warranty. "
+        "Could you describe the issue you're experiencing?",
+        session,
+        config,
+    )
+
+
+def _evaluate_warranty_status(purchase_date_iso: str, warranty_months: int) -> str:
+    try:
+        purchase_dt = datetime.fromisoformat(purchase_date_iso)
+    except Exception:
+        return "unknown"
+
+    now = datetime.now()
+    age_months = (now.year - purchase_dt.year) * 12 + (now.month - purchase_dt.month)
+
+    if age_months > warranty_months:
+        return "out_of_warranty"
+
+    return "in_warranty"
+
+
+def _result(prompt: str, session: dict, config: dict) -> dict:
+    return {"prompt": prompt, "session": session, "config": config}

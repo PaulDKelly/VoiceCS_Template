@@ -1,0 +1,34 @@
+{
+  "states": {
+    "start": {
+      "prompt": "What type of vehicle or service are you interested in?",
+      "capture": "sales_interest",
+      "next": "ask_budget"
+    },
+
+    "ask_budget": {
+      "prompt": "Do you have a budget range in mind?",
+      "capture": "sales_budget",
+      "next": "ask_usage"
+    },
+
+    "ask_usage": {
+      "prompt": "What will you mainly use the vehicle for? (commuting, family, long-distance, city driving)",
+      "capture": "sales_usage",
+      "next": "ask_preferences"
+    },
+
+    "ask_preferences": {
+      "prompt": "Do you have any preferences such as electric, hybrid, fuel type, or size?",
+      "capture": "sales_preferences",
+      "next": "summarise"
+    },
+
+    "summarise": {
+      "prompt": "Thanks, I have a good picture of what you're looking for. I can suggest a few suitable vehicle profiles or connect you with a sales advisor.",
+      "next": "end"
+    },
+
+    "end": {}
+  }
+}

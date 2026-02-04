@@ -1,0 +1,23 @@
+{
+  "states": {
+    "start": {
+      "prompt": "Hi, thanks for calling {{brand_name}}. Can I take your name?",
+      "capture": "customer_name",
+      "next": "ask_callback"
+    },
+    "ask_callback": {
+      "prompt": "Is this the best number to reach you on if we get disconnected?",
+      "capture": "callback_number",
+      "next": "ask_reason"
+    },
+    "ask_reason": {
+      "prompt": "What are you calling about today?",
+      "capture": "reason_for_call",
+      "next": "detect_intent"
+    },
+    "detect_intent": {
+      "type": "logic"
+    }
+  }
+}
+

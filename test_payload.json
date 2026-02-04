@@ -1,0 +1,14 @@
+[
+    {
+        "eventType": "Microsoft.Communication.IncomingCall",
+        "data": {
+            "incomingCallContext": "test-context-v4",
+            "from": {
+                "rawId": "user-456"
+            },
+            "to": {
+                "rawId": "bot-123"
+            }
+        }
+    }
+]

@@ -1,0 +1,68 @@
+{
+  "states": {
+    "start": {
+      "prompt": "Do you know roughly when the vehicle was purchased?",
+      "capture": "purchase_date",
+      "next": "determine_warranty_status"
+    },
+	
+    "collect_mileage": {
+      "prompt": "Do you know the current mileage?",
+      "capture": "mileage",
+      "next": "determine_warranty_status"
+    },
+
+    "determine_warranty_status": {
+      "decision": "warranty_status",
+      "on_in_warranty": "warranty_intro",
+      "on_out_of_warranty": "warranty_expired"
+    },
+
+    "warranty_intro": {
+      "prompt": "Thanks. It looks like your vehicle may still be under warranty. Could you briefly describe the issue you're experiencing?",
+      "capture": "issue_description",
+      "next": "warranty_collect_symptoms"
+    },
+
+    "warranty_collect_symptoms": {
+      "prompt": "Got it. When did this issue first start happening?",
+      "capture": "issue_start_date",
+      "next": "warranty_next_steps"
+    },
+
+    "warranty_next_steps": {
+      "prompt": "Thanks. I'll get this over to the warranty team to review. Is there anything else you'd like to add?",
+      "capture": "additional_notes",
+      "next": "end"
+    },
+
+    "warranty_expired": {
+      "prompt": "Thanks. Based on that date, it looks like your vehicle is outside its warranty period. I can still help — would you like me to find a trusted service provider near you?",
+      "capture": "warranty_expired_choice",
+      "next": "end"
+    },
+
+    "service_intro": {
+      "prompt": "Thanks. It looks like this will be a standard service appointment. Could you briefly describe the issue you're experiencing?",
+      "capture": "issue_description",
+      "next": "service_collect_preferred_date"
+    },
+
+    "service_collect_preferred_date": {
+      "prompt": "Do you have a preferred date for the service appointment?",
+      "capture": "preferred_date",
+      "next": "service_next_steps"
+    },
+
+    "service_next_steps": {
+      "prompt": "Thanks. I'll get this booked in for you. Is there anything else you'd like to add?",
+      "capture": "additional_notes",
+      "next": "end"
+    },
+
+    "end": {
+      "prompt": "Thanks, I've got everything I need."
+    }
+  }
+}
+

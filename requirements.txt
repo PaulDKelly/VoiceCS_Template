@@ -1,8 +1,25 @@
-# Uncomment to enable Azure Monitor OpenTelemetry
-# Ref: aka.ms/functions-azure-monitor-python 
-# azure-monitor-opentelemetry 
+# Web Framework (for main.py Bot Framework endpoint)
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
 
-requests
-azure-functions
-azure-communication-callautomation
-openai
+# Bot Framework Dependencies
+aiohttp==3.9.1
+botbuilder-core==4.15.0
+botbuilder-schema==4.15.0
+botframework-connector==4.15.0
+
+# Azure and AI Dependencies
+openai>=1.55.0
+azure-identity==1.15.0
+azure-ai-inference==1.0.0b1
+azure-communication-callautomation>=1.5.0
+twilio>=9.0.0
+azure-eventgrid>=4.16.0
+azure-storage-blob>=12.0.0
+azure-cognitiveservices-speech>=1.33.0
+websockets==11.0.3
+
+# Utilities
+python-dotenv==1.0.0
+requests==2.31.0
+python-dateutil>=2.8.0

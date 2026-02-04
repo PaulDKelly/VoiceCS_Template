@@ -1,0 +1,19 @@
+
+{
+  "client_id": "fortell",
+  "brand_name": "Fortell",
+  "agent_name": "Aida",
+  "assistant_name": "Aida",
+  "opening_hours": "Monday to Saturday, 8am to 6pm",
+  "brand_phone": "0121 555 1234",
+  "tone": "friendly, concise, helpful",
+  "voice_name": "en-GB-LibbyNeural",
+  "language": "en-GB",
+  "warranty_period_months": 6,
+
+  "enable_warranty": true,
+  "enable_sales": false,
+  "enable_service": false,
+  "enable_finance": false
+}
+

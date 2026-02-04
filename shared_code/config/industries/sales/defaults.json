@@ -1,0 +1,206 @@
+{
+    "industry": "sales",
+    "default_tone": "enthusiastic and helpful",
+    "default_brand_name": "Your Company",
+    "intents": [
+        "first_response",
+        "sales",
+        "general"
+    ],
+    "prompts": {
+        "system_greeting": "Hi, I'm {assistant} with {brand}. Before we get into the details, can I take your name?",
+        "ask_intent_with_name": "How can I help you today, {name}?",
+        "ask_intent_retry_giveup": "How can I help you today?",
+        "ask_name_retry": "Sorry, I didn't catch your name. Could you say it again?",
+        "intent_fallback": "Sorry, I didn't quite catch that. How can I help you today?",
+        "sales_start": "Great! I'd be happy to help you with that. What are you interested in?",
+        "sales_ask_product": "What product or service are you interested in?",
+        "sales_ask_quantity": "How many would you like to order?",
+        "sales_ask_contact": "Perfect! I'd like to have one of our team reach out to you. What's the best phone number to contact you?",
+        "sales_confirm": "Thanks {name}! I've captured all your details. One of our team will be in touch shortly. Is there anything else I can help with today?"
+    },
+    "workflows": {
+        "first_response": {
+            "nodes": [
+                {
+                    "id": "fr1",
+                    "type": "input",
+                    "data": {
+                        "label": "Greeting & Name",
+                        "promptKey": "system_greeting"
+                    },
+                    "position": {
+                        "x": 250,
+                        "y": 0
+                    }
+                },
+                {
+                    "id": "fr2",
+                    "type": "action",
+                    "data": {
+                        "label": "Extract Name",
+                        "actionType": "extract_name",
+                        "actionConfig": {
+                            "target": "customer_name"
+                        }
+                    },
+                    "position": {
+                        "x": 250,
+                        "y": 100
+                    }
+                },
+                {
+                    "id": "fr3",
+                    "type": "default",
+                    "data": {
+                        "label": "Ask Intent",
+                        "promptKey": "ask_intent_with_name"
+                    },
+                    "position": {
+                        "x": 250,
+                        "y": 200
+                    }
+                },
+                {
+                    "id": "fr4",
+                    "type": "action",
+                    "data": {
+                        "label": "Detect Intent",
+                        "actionType": "detect_intent"
+                    },
+                    "position": {
+                        "x": 250,
+                        "y": 300
+                    }
+                }
+            ],
+            "edges": [
+                {
+                    "id": "efr1-2",
+                    "source": "fr1",
+                    "target": "fr2"
+                },
+                {
+                    "id": "efr2-3",
+                    "source": "fr2",
+                    "target": "fr3"
+                },
+                {
+                    "id": "efr3-4",
+                    "source": "fr3",
+                    "target": "fr4"
+                }
+            ]
+        },
+        "sales": {
+            "nodes": [
+                {
+                    "id": "s1",
+                    "type": "default",
+                    "data": {
+                        "label": "Sales Start",
+                        "promptKey": "sales_start"
+                    },
+                    "position": {
+                        "x": 250,
+                        "y": 0
+                    }
+                },
+                {
+                    "id": "s2",
+                    "type": "default",
+                    "data": {
+                        "label": "Ask Product",
+                        "promptKey": "sales_ask_product",
+                        "captureVariable": "product"
+                    },
+                    "position": {
+                        "x": 250,
+                        "y": 100
+                    }
+                },
+                {
+                    "id": "s3",
+                    "type": "default",
+                    "data": {
+                        "label": "Ask Quantity",
+                        "promptKey": "sales_ask_quantity",
+                        "captureVariable": "quantity"
+                    },
+                    "position": {
+                        "x": 250,
+                        "y": 200
+                    }
+                },
+                {
+                    "id": "s4",
+                    "type": "default",
+                    "data": {
+                        "label": "Ask Contact Number",
+                        "promptKey": "sales_ask_contact",
+                        "captureVariable": "contact_number"
+                    },
+                    "position": {
+                        "x": 250,
+                        "y": 300
+                    }
+                },
+                {
+                    "id": "s5",
+                    "type": "action",
+                    "data": {
+                        "label": "Send Order Email",
+                        "actionType": "email",
+                        "actionConfig": {
+                            "to": "sales@company.com",
+                            "subject": "New Order: {customer_name}"
+                        }
+                    },
+                    "position": {
+                        "x": 250,
+                        "y": 400
+                    }
+                },
+                {
+                    "id": "s6",
+                    "type": "default",
+                    "data": {
+                        "label": "Confirm",
+                        "promptKey": "sales_confirm"
+                    },
+                    "position": {
+                        "x": 250,
+                        "y": 500
+                    }
+                }
+            ],
+            "edges": [
+                {
+                    "id": "es1-2",
+                    "source": "s1",
+                    "target": "s2"
+                },
+                {
+                    "id": "es2-3",
+                    "source": "s2",
+                    "target": "s3"
+                },
+                {
+                    "id": "es3-4",
+                    "source": "s3",
+                    "target": "s4"
+                },
+                {
+                    "id": "es4-5",
+                    "source": "s4",
+                    "target": "s5"
+                },
+                {
+                    "id": "es5-6",
+                    "source": "s5",
+                    "target": "s6"
+                }
+            ]
+        }
+    }
+}

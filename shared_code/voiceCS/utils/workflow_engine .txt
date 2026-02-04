@@ -1,0 +1,53 @@
+import json
+import os
+
+SESSION_DIR = "sessions"
+os.makedirs(SESSION_DIR, exist_ok=True)
+
+def session_path(session_id):
+    return os.path.join(SESSION_DIR, f"{session_id}.json")
+
+def load_session(session_id):
+    path = session_path(session_id)
+    if os.path.exists(path):
+        with open(path, "r") as f:
+            return json.load(f)
+    return {}
+
+def save_session(session_id, data):
+    with open(session_path(session_id), "w") as f:
+        json.dump(data, f)
+
+def next_state(intent, session):
+    if session["state"] == "start":
+        return "ask_purchase_date"
+    return "start"
+
+def build_state_prompt(intent, client_id, industry, state):
+    if state == "ask_purchase_date":
+        return "Do you know roughly when the vehicle was purchased?"
+    return "How can I help you today?"
+
+def run_workflow_step(session_id, user_text):
+    session = load_session(session_id)
+
+    session.setdefault("client_id", "autonova")
+    session.setdefault("industry", "automotive")
+
+    if not session.get("intent"):
+        session["intent"] = "service"
+        session["state"] = "start"
+
+    new_state = next_state(session["intent"], session)
+    session["state"] = new_state
+    save_session(session_id, session)
+
+    prompt = build_state_prompt(
+        session["intent"],
+        session["client_id"],
+        session["industry"],
+        new_state,
+    )
+
+    return prompt
+

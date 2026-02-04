@@ -1,27 +1,66 @@
 {
-	"version": "2.0.0",
-	"tasks": [
-		{
-			"type": "func",
-			"label": "func: host start",
-			"command": "host start",
-			"problemMatcher": "$func-python-watch",
-			"isBackground": true,
-			"dependsOn": "pip install (functions)"
-		},
-		{
-			"label": "pip install (functions)",
-			"type": "shell",
-			"osx": {
-				"command": "${config:azureFunctions.pythonVenv}/bin/python -m pip install -r requirements.txt"
-			},
-			"windows": {
-				"command": "${config:azureFunctions.pythonVenv}\\Scripts\\python -m pip install -r requirements.txt"
-			},
-			"linux": {
-				"command": "${config:azureFunctions.pythonVenv}/bin/python -m pip install -r requirements.txt"
-			},
-			"problemMatcher": []
-		}
-	]
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "type": "func",
+      "label": "func: host start",
+      "command": "host start",
+      "problemMatcher": "$func-python-watch",
+      "isBackground": true,
+      "dependsOn": "pip install (functions)"
+    },
+    {
+      "label": "pip install (functions)",
+      "type": "shell",
+      "osx": {
+        "command": "${config:azureFunctions.pythonVenv}/bin/python -m pip install -r requirements.txt"
+      },
+      "windows": {
+        "command": "${config:azureFunctions.pythonVenv}\\Scripts\\python -m pip install -r requirements.txt"
+      },
+      "linux": {
+        "command": "${config:azureFunctions.pythonVenv}/bin/python -m pip install -r requirements.txt"
+      },
+      "problemMatcher": []
+    },
+
+    /* ---------------------------------------------------------
+       NEW: Run Synthetic Call Flow
+       --------------------------------------------------------- */
+    {
+      "label": "Run Synthetic Call Flow",
+      "type": "shell",
+      "command": "pwsh ./test-call-flow.ps1",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+
+    /* ---------------------------------------------------------
+       NEW: ACS Event Dashboard (filtered logs)
+       --------------------------------------------------------- */
+    {
+      "label": "ACS Event Dashboard",
+      "type": "shell",
+      "command": "pwsh ./tail-acs-logs.ps1",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+
+    /* ---------------------------------------------------------
+       NEW: Full Synthetic Call Flow (host + events)
+       --------------------------------------------------------- */
+    {
+      "label": "Full Synthetic Call Flow",
+      "dependsOn": [
+        "func: host start",
+        "Run Synthetic Call Flow"
+      ],
+      "dependsOrder": "sequence",
+      "problemMatcher": []
+    }
+  ]
 }

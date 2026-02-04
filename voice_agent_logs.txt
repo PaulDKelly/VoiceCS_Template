@@ -1,0 +1,14 @@
+﻿2026-02-03T18:15:00.49524  Connecting to the container 'voice-agent'...
+2026-02-03T18:15:00.51836  Successfully Connected to container: 'voice-agent' [Revision: 'app-voice-agent--0000048', Replica: 'app-voice-agent--0000048-5646bc5fc9-h6z97']
+2026-02-03T18:05:29.0859242Z stdout F DEBUG: Headers: Headers(raw=[(b'host', b'app-voice-agent.bluefield-9f0e7247.uksouth.azurecontainerapps.io'), (b'content-type', b'application/x-www-form-urlencoded; charset=UTF-8'), (b'x-twilio-service-flow-event', b'%7B%22flow_id%22%3A%22RQed8a51615e56a102526b29a5ef3a1c25%22%2C%22type%22%3A%22api_event%22%2C%22action%22%3A%22twiml_fetch%22%2C%22sub_action%22%3A%22completed%22%2C%22result%22%3A%22success%22%2C%22metadata%22%3A%7B%22transfer_type%22%3A%22call_transfer_url%22%7D%7D'), (b'i-twilio-idempotency-token', b'ae2f2c97-baaf-4f76-8da3-32ae295e2bf0'), (b'x-twilio-answertimeout', b'PT15S'), (b'x-twilio-answertimeout', b'PT15S'), (b'x-twilio-signature', b'EQoPnuiYn89O8ga5QT03WqIR6Lw='), (b'accept', b'*/*'), (b'content-length', b'812'), (b'x-home-region', b'us1'), (b'user-agent', b'TwilioProxy/1.1'), (b'x-forwarded-for', b'3.92.240.138'), (b'x-envoy-external-address', b'3.92.240.138'), (b'x-request-id', b'e6ff9e86-ad86-4b31-9424-3dbef9efa6f5'), (b'x-envoy-expected-rq-timeout-ms', b'1800000'), (b'x-k8se-app-name', b'app-voice-agent--0000048'), (b'x-k8se-app-namespace', b'k8se-apps'), (b'x-k8se-protocol', b'http1'), (b'x-k8se-app-kind', b'web'), (b'x-ms-containerapp-name', b'app-voice-agent'), (b'x-ms-containerapp-revision-name', b'app-voice-agent--0000048'), (b'x-arr-ssl', b'true'), (b'x-forwarded-proto', b'https'), (b'x-forwarded-path', b'/api/incoming-call')])
+2026-02-03T18:05:29.0859642Z stdout F DEBUG: Incoming call from Host: app-voice-agent.bluefield-9f0e7247.uksouth.azurecontainerapps.io
+2026-02-03T18:05:29.0859808Z stdout F DEBUG: Configured Public URL: https://app-voice-agent.bluefield-9f0e7247.uksouth.azurecontainerapps.io
+2026-02-03T18:05:29.0859865Z stdout F DEBUG: Generated TwiML Stream URL: wss://app-voice-agent.bluefield-9f0e7247.uksouth.azurecontainerapps.io/api/audio-twilio
+2026-02-03T18:05:29.0859885Z stdout F DEBUG: Caller ID: Unknown
+2026-02-03T18:05:29.0859903Z stdout F DEBUG: Called Number: Unknown
+2026-02-03T18:05:29.0859922Z stdout F ERROR: Failed to load phone mappings: name 'json' is not defined
+2026-02-03T18:05:29.0859942Z stdout F INFO:     100.100.0.13:33724 - "POST /api/incoming-call HTTP/1.1" 200 OK
+2026-02-03T18:13:16.7648736Z stdout F INFO:     100.100.0.13:47244 - "GET / HTTP/1.1" 200 OK
+2026-02-03T18:13:34.0734527Z stdout F INFO:     100.100.0.110:44460 - "GET / HTTP/1.1" 200 OK
+2026-02-03T18:14:41.5703827Z stdout F INFO:     100.100.0.110:46646 - "GET / HTTP/1.1" 200 OK
+2026-02-03T18:14:58.6610116Z stdout F INFO:     100.100.0.13:36252 - "GET / HTTP/1.1" 200 OK

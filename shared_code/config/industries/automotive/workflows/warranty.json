@@ -1,0 +1,37 @@
+{
+  "states": {
+    "start": {
+      "capture": "issue_description",
+      "next": "collect_registration"
+    },
+
+    "collect_registration": {
+      "capture": "registration",
+      "next": "collect_purchase_date"
+    },
+
+    "collect_purchase_date": {
+      "capture": "purchase_date",
+      "next": "collect_purchase_location"
+    },
+
+    "collect_purchase_location": {
+      "capture": "purchase_location",
+      "next": "evaluate_warranty"
+    },
+
+    "evaluate_warranty": {
+      "next": "in_warranty"
+    },
+
+    "in_warranty": {
+      "next": "end"
+    },
+
+    "out_of_warranty": {
+      "next": "end"
+    },
+
+    "end": {}
+  }
+}

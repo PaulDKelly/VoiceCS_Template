@@ -1,0 +1,30 @@
+{
+  "industry": "automotive",
+
+  "default_tone": "friendly and professional",
+  "default_brand_name": "Your Automotive Brand",
+
+  "intents": [
+    "warranty",
+    "service",
+    "sales",
+    "finance",
+    "general"
+  ],
+
+  "start_of_call": {
+    "ask_name": true,
+    "ask_callback_number": true,
+    "ask_reason_for_call": true
+  },
+
+  "warranty_rules": {
+    "default_warranty_months": 36
+  },
+
+  "service_rules": {
+    "collect_registration": true,
+    "collect_mileage": true
+  }
+}
+

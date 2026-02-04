@@ -1,0 +1,126 @@
+{
+    "prompts": [
+        {
+            "name": "General Assistant",
+            "category": "Persona",
+            "text": "You are a helpful and polite voice assistant. Your goal is to assist the caller with their inquiries efficiently. Always be courteous and patient."
+        },
+        {
+            "name": "Initial Greeting",
+            "category": "Standard Interaction",
+            "suggested_key": "system_greeting",
+            "text": "Hi, I'm {assistant} with {brand}. Before we get into the details, can I take your name?"
+        },
+        {
+            "name": "Ask Intent (with name)",
+            "category": "Standard Interaction",
+            "suggested_key": "ask_intent_with_name",
+            "text": "How can I help you today, {name}?"
+        },
+        {
+            "name": "Ask Intent (fallback)",
+            "category": "Standard Interaction",
+            "suggested_key": "ask_intent_retry_giveup",
+            "text": "How can I help you today?"
+        },
+        {
+            "name": "Ask Name Retry",
+            "category": "Standard Interaction",
+            "suggested_key": "ask_name_retry",
+            "text": "Sorry, I didn't catch your name. Could you say it again?"
+        },
+        {
+            "name": "General Fallback",
+            "category": "Standard Interaction",
+            "suggested_key": "intent_fallback",
+            "text": "Sorry, I didn't quite catch that. How can I help you today?"
+        },
+        {
+            "name": "Date & Time Handling",
+            "category": "Standard Instruction",
+            "text": "When discussing dates and times, always confirm the specific day of the week and date to avoid confusion. If the user says 'next Tuesday', clarify the exact date."
+        },
+        {
+            "name": "Fallback / Error Handling",
+            "category": "Standard Instruction",
+            "text": "If you do not understand the user, ask them to repeat or rephrase. If the issue persists, offer to transfer them to a human agent."
+        },
+        {
+            "name": "Ask Telephone Number",
+            "category": "Specific",
+            "subcategory": "Data Collection",
+            "suggested_key": "contact_number_collection",
+            "text": "What's the best phone number to contact you on, just in case we get disconnected?"
+        },
+        {
+            "name": "Sales Start",
+            "category": "Specific",
+            "subcategory": "Sales",
+            "suggested_key": "sales_start",
+            "text": "Great! I'd be happy to help you with that. What are you interested in?"
+        },
+        {
+            "name": "Ask Product Interest",
+            "category": "Specific",
+            "subcategory": "Sales",
+            "suggested_key": "sales_ask_product",
+            "text": "What product or service are you interested in today?"
+        },
+        {
+            "name": "Ask Quantity",
+            "category": "Specific",
+            "subcategory": "Sales",
+            "suggested_key": "sales_ask_quantity",
+            "text": "How many would you like to order?"
+        },
+        {
+            "name": "Ask Budget",
+            "category": "Specific",
+            "subcategory": "Sales",
+            "suggested_key": "sales_ask_budget",
+            "text": "Do you have a budget in mind for this purchase?"
+        },
+        {
+            "name": "Sales Confirmation",
+            "category": "Specific",
+            "subcategory": "Sales",
+            "suggested_key": "sales_confirm",
+            "text": "Thanks {name}! I've captured all your details. One of our sales team will be in touch shortly to discuss your options. Is there anything else I can help with today?"
+        },
+        {
+            "name": "Service Appointment Inquiry",
+            "category": "Specific",
+            "subcategory": "Service",
+            "suggested_key": "service_ask_appointment",
+            "text": "Would you like to book a service appointment today?"
+        },
+        {
+            "name": "Ask Vehicle Registration",
+            "category": "Specific",
+            "subcategory": "Automotive",
+            "suggested_key": "ask_vehicle_registration",
+            "text": "Can I take your vehicle registration number, please?"
+        },
+        {
+            "name": "Warranty Issue Description",
+            "category": "Specific",
+            "subcategory": "Warranty",
+            "suggested_key": "warranty_valid_ask_issue",
+            "text": "It looks like the vehicle is within the warranty period. Could you describe the issue you're experiencing?"
+        },
+        {
+            "name": "Ask Purchase Date",
+            "category": "Specific",
+            "subcategory": "Warranty",
+            "suggested_key": "warranty_ask_purchase_date",
+            "text": "Do you know roughly when the vehicle was purchased?"
+        },
+        {
+            "name": "Complete Handoff",
+            "category": "Specific",
+            "subcategory": "Utility",
+            "suggested_key": "handoff_complete",
+            "text": "I'll pass those details on to the team now. Is there anything else I can help with?"
+        }
+    ]
+}

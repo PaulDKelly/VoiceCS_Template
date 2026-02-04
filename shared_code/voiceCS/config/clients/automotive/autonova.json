@@ -1,0 +1,20 @@
+{
+  "client_id": "autonova",
+  "brand_name": "AutoNova",
+  "assistant_name": "Nova",
+  "agent_name": "Nova",
+  "opening_hours": "Monday to Saturday, 8am to 6pm",
+  "brand_phone": "01234 567890",
+  "tone": "friendly, concise, helpful",
+  "voice_name": "en-GB-LibbyNeural",
+  "language": "en-GB",
+  "warranty_period_months": 6,
+
+  "enable_warranty": true,
+  "enable_sales": false,
+  "enable_service": true,
+  "enable_finance": false
+}
+
+
+

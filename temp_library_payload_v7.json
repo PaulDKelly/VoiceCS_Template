@@ -1,0 +1,104 @@
+{
+    "type": "prompt_library",
+    "industry": "default",
+    "content": {
+        "prompts": [
+            {
+                "name": "General Assistant",
+                "category": "Persona",
+                "text": "You are a helpful and polite voice assistant. Your goal is to assist the caller with their inquiries efficiently. Always be courteous and patient.",
+                "suggested_key": "general"
+            },
+            {
+                "name": "Service Desk Agent",
+                "category": "Persona",
+                "text": "You are a service desk agent. You help customers book appointments, check service status, and answer technical questions.",
+                "suggested_key": "service"
+            },
+            {
+                "name": "Service Appointment Booking",
+                "category": "Workflow",
+                "subcategory": "Service",
+                "text": "I can certainly help you book a service. What is the make and model of your vehicle?",
+                "suggested_key": "service_book_appointment"
+            },
+            {
+                "name": "Service Status Check",
+                "category": "Workflow",
+                "subcategory": "Service",
+                "text": "To check the status of your vehicle, could you please provide your registration number?",
+                "suggested_key": "service_check_status"
+            },
+            {
+                "name": "Service Cost Inquiry",
+                "category": "Workflow",
+                "subcategory": "Service",
+                "text": "The cost of a service depends on your vehicle type and mileage. Can you tell me your current mileage?",
+                "suggested_key": "service_cost_inquiry"
+            },
+            {
+                "name": "Sales Representative",
+                "category": "Persona",
+                "text": "You are a sales representative. Your goal is to capture lead details, schedule test drives, and provide information about vehicle availability.",
+                "suggested_key": "sales"
+            },
+            {
+                "name": "Welcome / Ask Intent",
+                "category": "Standard Interaction",
+                "text": "How can I help you today?",
+                "suggested_key": "ask_intent_retry_giveup"
+            },
+            {
+                "name": "Welcome (with Name)",
+                "category": "Standard Interaction",
+                "text": "Hi, I'm {assistant}. Before we get into the details, can I take your name?",
+                "suggested_key": "system_greeting"
+            },
+            {
+                "name": "Ask Intent (with Name)",
+                "category": "Standard Interaction",
+                "text": "How can I help you today, {name}?",
+                "suggested_key": "ask_intent_with_name"
+            },
+            {
+                "name": "Ask Name Retry",
+                "category": "Standard Interaction",
+                "text": "Sorry, I didn't catch your name. Could you say it again?",
+                "suggested_key": "ask_name_retry"
+            },
+            {
+                "name": "General Fallback",
+                "category": "Standard Interaction",
+                "text": "Sorry, I didn't quite catch that. How can I help you today?",
+                "suggested_key": "intent_fallback"
+            },
+            {
+                "name": "Transfer Failed",
+                "category": "Standard Interaction",
+                "text": "I'm having trouble connecting you to an agent right now. Please try again later.",
+                "suggested_key": "transfer_failed_message"
+            },
+            {
+                "name": "Warranty Check (In Warranty)",
+                "category": "Workflow",
+                "subcategory": "Warranty",
+                "text": "Thanks. It looks like the vehicle is within the warranty period. Could you describe the issue you're experiencing?",
+                "suggested_key": "warranty_valid_ask_issue"
+            },
+            {
+                "name": "Warranty Check (Expired)",
+                "category": "Workflow",
+                "subcategory": "Warranty",
+                "text": "Thanks for that. It looks like the vehicle is outside the manufacturer warranty. You may want to contact an independent garage. Is there anything else?",
+                "suggested_key": "warranty_expired_redirect"
+            },
+            {
+                "name": "Book Appointment (Capture)",
+                "category": "Workflow",
+                "subcategory": "Appointment",
+                "text": "I can help with that. What day of the week works best for you?",
+                "suggested_key": "appointment_ask_date"
+            }
+        ]
+    }
+}

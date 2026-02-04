@@ -1,0 +1,16 @@
+{
+  "name": "VoiceCS Bot (Local)",
+  "description": "Voice customer service bot for local testing",
+  "services": [
+    {
+      "type": "endpoint",
+      "name": "Local Development",
+      "id": "local-endpoint",
+      "appId": "",
+      "appPassword": "",
+      "endpoint": "http://localhost:8000/api/messages"
+    }
+  ],
+  "padlock": "",
+  "version": "2.0"
+}

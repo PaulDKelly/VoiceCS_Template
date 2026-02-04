@@ -1,0 +1,24 @@
+{
+    "users": [
+        {
+            "id": "1",
+            "username": "admin",
+            "password_hash": "$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWrn96pzkZePnEJ.LqcXMsg/m/3O6i",
+            "role": "admin",
+            "allowed_clients": [
+                "*"
+            ],
+            "name": "Super Admin"
+        },
+        {
+            "id": "2",
+            "username": "autonova_user",
+            "password_hash": "$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWrn96pzkZePnEJ.LqcXMsg/m/3O6i",
+            "role": "user",
+            "allowed_clients": [
+                "autonova"
+            ],
+            "name": "Autonova Rep"
+        }
+    ]
+}

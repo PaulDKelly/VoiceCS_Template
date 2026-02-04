@@ -1,0 +1,7 @@
+{
+  "warranty": ["warranty", "guarantee"],
+  "sales": ["buy", "purchase", "new car", "used car", "test drive"],
+  "service": ["service", "MOT", "maintenance", "noise", "issue", "problem"],
+  "finance": ["finance", "payment", "agreement", "settlement", "monthly payment"]
+}
+

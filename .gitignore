@@ -48,3 +48,11 @@ __pycache__/
 __blobstorage__
 __queuestorage__
 __azurite_db*__.json
+
+# Logs and Local Configs
+*.log
+*.yaml
+*.yml
+!action.yml
+!action.yaml
+deploy_bot.ps1

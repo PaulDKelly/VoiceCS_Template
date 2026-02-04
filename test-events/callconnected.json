@@ -3,5 +3,10 @@
   "callConnectionId": "test-connection",
   "serverCallId": "test-call",
   "correlationId": "test-correlation",
-  "data": {}
+
+  "data": {
+    "client_id": "autonova",
+    "industry": "automotive"
+  }
 }
+
