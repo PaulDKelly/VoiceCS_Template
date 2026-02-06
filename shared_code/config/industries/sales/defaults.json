@@ -8,8 +8,8 @@
         "general"
     ],
     "prompts": {
-        "system_greeting": "Hi, I'm {assistant} with {brand}. Before we get into the details, can I take your name?",
-        "ask_intent_with_name": "How can I help you today, {name}?",
+        "first_response_greeting": "Hi, I'm {assistant} with {brand}. Before we get into the details, can I take your name?",
+        "first_response_ask_intent": "How can I help you today, {name}?",
         "ask_intent_retry_giveup": "How can I help you today?",
         "ask_name_retry": "Sorry, I didn't catch your name. Could you say it again?",
         "intent_fallback": "Sorry, I didn't quite catch that. How can I help you today?",
@@ -17,7 +17,8 @@
         "sales_ask_product": "What product or service are you interested in?",
         "sales_ask_quantity": "How many would you like to order?",
         "sales_ask_contact": "Perfect! I'd like to have one of our team reach out to you. What's the best phone number to contact you?",
-        "sales_confirm": "Thanks {name}! I've captured all your details. One of our team will be in touch shortly. Is there anything else I can help with today?"
+        "sales_confirm": "Thanks {name}! I've captured all your details. One of our team will be in touch shortly. Is there anything else I can help with today?",
+        "intent_not_recognized": "Sorry, I’m not able to help with that. Is there anything else I can assist you with?"
     },
     "workflows": {
         "first_response": {
@@ -27,7 +28,7 @@
                     "type": "input",
                     "data": {
                         "label": "Greeting & Name",
-                        "promptKey": "system_greeting"
+                        "promptKey": "first_response_greeting"
                     },
                     "position": {
                         "x": 250,
@@ -54,7 +55,7 @@
                     "type": "default",
                     "data": {
                         "label": "Ask Intent",
-                        "promptKey": "ask_intent_with_name"
+                        "promptKey": "first_response_ask_intent"
                     },
                     "position": {
                         "x": 250,

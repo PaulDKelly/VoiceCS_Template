@@ -39,7 +39,7 @@ def handle_generic_workflow(session_id: str, text: str) -> dict:
         # Skip straight to prompt generation for start node
         session["current_node_id"] = current_node_id
         save_session(session_id, session)
-        return _process_node(current_node_id, nodes, edges, session, config)
+        return _process_node(current_node_id, nodes, edges, session, config, session_id)
 
     # 2. Step Traversal (we were already at a node, now processing user response)
     current_node = next((n for n in nodes if n["id"] == current_node_id), None)
@@ -78,23 +78,49 @@ def handle_generic_workflow(session_id: str, text: str) -> dict:
     session["current_node_id"] = next_node_id
     save_session(session_id, session)
     
-    return _process_node(next_node_id, nodes, edges, session, config)
+    return _process_node(next_node_id, nodes, edges, session, config, session_id)
 
-def _process_node(node_id: str, nodes: list, edges: list, session: dict, config: dict) -> dict:
+def _process_node(node_id: str, nodes: list, edges: list, session: dict, config: dict, session_id: str) -> dict:
     node = next((n for n in nodes if n["id"] == node_id), None)
     if not node:
          return {"prompt": "Workflow Error: Node not found.", "session": session, "config": config}
 
-    # 1. Action Execution
+    # 1. Handoff Execution
+    if node.get("type") == "handoff":
+        target = node.get("data", {}).get("targetWorkflow")
+        if target:
+            session["intent"] = target
+            session["current_node_id"] = None
+            save_session(session_id, session)
+            from shared_code.agent.workflow_router import route_to_workflow
+            return route_to_workflow(target, session_id, "")
+
+    # 2. Action Execution
     if node.get("type") == "action":
-        _execute_action(node, session, config)
+        action_result = _execute_action(node, session, config)
+        if action_result:
+            if action_result.get("prompt"):
+                # If a direct prompt is returned, stop traversal and reply immediately
+                session["current_node_id"] = None
+                save_session(session_id, session)
+                return {"prompt": action_result["prompt"], "session": session, "config": config}
+
+            if action_result.get("handoff_intent"):
+                target_intent = action_result["handoff_intent"]
+                session["intent"] = target_intent
+                session["current_node_id"] = None
+                save_session(session_id, session)
+                from shared_code.agent.workflow_router import route_to_workflow
+                result = route_to_workflow(target_intent, session_id, text)
+                result["handoff_complete"] = True
+                return result
         # Actions are transparent to the user, move to next node immediately
         outgoing = [e for e in edges if e["source"] == node_id]
         if outgoing:
             next_id = outgoing[0]["target"]
             session["current_node_id"] = next_id
-            save_session(session.get("session_id", "temp"), session) # Note: session_id might not be in session dict
-            return _process_node(next_id, nodes, edges, session, config)
+            save_session(session_id, session)
+            return _process_node(next_id, nodes, edges, session, config, session_id)
         else:
             return {"prompt": "I've processed your request. Is there anything else? [HANGUP]", "session": session, "config": config}
 
@@ -109,9 +135,33 @@ def _process_node(node_id: str, nodes: list, edges: list, session: dict, config:
     import re
     def replace_var(match):
         var_name = match.group(1)
-        return str(session.get(var_name, f"[{var_name}]"))
-    
-    prompt = re.sub(r'\{(\w+)\}', replace_var, prompt)
+
+        # Common aliases
+        if var_name == "assistant":
+            return str(
+                session.get("assistant")
+                or config.get("assistant_name")
+                or config.get("agent_name")
+                or "agent"
+            )
+        if var_name == "brand":
+            return str(
+                session.get("brand")
+                or config.get("brand_name")
+                or config.get("default_brand_name")
+                or "brand"
+            )
+        if var_name == "name":
+            return str(session.get("customer_name") or session.get("name") or "there")
+
+        # Default: session first, then config
+        return str(
+            session.get(var_name)
+            or config.get(var_name)
+            or f"[{var_name}]"
+        )
+
+    prompt = re.sub(r"\{(\w+)\}", replace_var, prompt)
 
     return {"prompt": prompt, "session": session, "config": config}
 
@@ -184,14 +234,25 @@ def _execute_action(node: dict, session: dict, config: dict):
             print(f"DEBUG: ExtractName action found: {name}", flush=True)
 
     elif action_type == 'detect_intent':
+        fixed_intent = action_config.get("fixed_intent") or action_config.get("target_intent")
+        if fixed_intent:
+            print(f"DEBUG: DetectIntent action using fixed intent: {fixed_intent}.", flush=True)
+            return {"handoff_intent": fixed_intent}
+
         from shared_code.routing.intent_router import detect_intent
         last_text = session.get("_last_user_input", "")
-        intent = detect_intent(last_text, session.get("client_id"), session.get("industry"))
-        if intent:
-            session["intent"] = intent
-            # Reset workflow state so the new intent can start fresh
-            session["current_node_id"] = None
-            print(f"DEBUG: DetectIntent action found: {intent}. Switching workflow.", flush=True)
+        # Use keyword-only routing for deterministic workflow handoff
+        intent = detect_intent(last_text, session.get("client_id"), session.get("industry"), allow_llm=False)
+        if not intent:
+            # No intent matched: provide a polite fallback prompt
+            fallback = (
+                config.get("prompts", {}).get("intent_not_recognized")
+                or "Sorry, I’m not able to help with that. Is there anything else I can assist you with?"
+            )
+            print("DEBUG: DetectIntent action found no intent. Using fallback prompt.", flush=True)
+            return {"prompt": fallback}
+        print(f"DEBUG: DetectIntent action found: {intent}. Switching workflow.", flush=True)
+        return {"handoff_intent": intent}
 
     elif action_type == 'update_session':
         updates = action_config.get("updates", {})

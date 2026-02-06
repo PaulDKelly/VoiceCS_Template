@@ -40,8 +40,8 @@
     }
   },
   "prompts": {
-    "system_greeting": "Hi, I’m {assistant} with {brand}. Before we get into the details, can I take your name?",
-    "ask_intent_with_name": "How can I help you today, {name}?",
+    "first_response_greeting": "Hi, I’m {assistant} with {brand}. Before we get into the details, can I take your name?",
+    "first_response_ask_intent": "How can I help you today, {name}?",
     "ask_intent_retry_giveup": "How can I help you today?",
     "ask_name_retry": "Sorry, I didn't catch your name. Could you say it again?",
     "intent_fallback": "Sorry, I didn’t quite catch that. How can I help you today?",
@@ -49,6 +49,7 @@
     "warranty_ask_purchase_date": "Do you know roughly when the vehicle was purchased?",
     "warranty_expired_redirect": "Thanks for that. It looks like the vehicle is outside the manufacturer warranty. You may want to contact an independent garage. Is there anything else?",
     "warranty_expired_capture": "Thanks for that. Although the vehicle is outside warranty, I can still take some details. Could you describe the issue?",
+    "intent_not_recognized": "Sorry, I’m not able to help with that. Is there anything else I can assist you with?",
     "sales_start": "Great! I'd be happy to help you with that. What are you interested in?",
     "sales_ask_vehicle_type": "What type of vehicle are you looking for? For example, a sedan, SUV, or truck?",
     "sales_ask_budget": "Do you have a budget in mind?",
@@ -63,7 +64,7 @@
           "type": "input",
           "data": {
             "label": "Greeting & Name",
-            "promptKey": "system_greeting"
+            "promptKey": "first_response_greeting"
           },
           "position": {
             "x": 250,
@@ -90,7 +91,7 @@
           "type": "default",
           "data": {
             "label": "Ask Intent",
-            "promptKey": "ask_intent_with_name"
+            "promptKey": "first_response_ask_intent"
           },
           "position": {
             "x": 250,

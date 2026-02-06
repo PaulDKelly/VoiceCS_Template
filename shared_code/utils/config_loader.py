@@ -1,6 +1,9 @@
 import json
 import os
-from azure.storage.blob import BlobServiceClient
+try:
+    from azure.storage.blob import BlobServiceClient
+except Exception:
+    BlobServiceClient = None
 
 BASE_DIR = os.path.dirname(__file__)
 # Allow overriding the config source location (e.g. for mounted volumes)
@@ -16,6 +19,8 @@ _container_client = None
 def _get_container():
     global _blob_client, _container_client
     if not BLOB_CONNECTION:
+        return None
+    if BlobServiceClient is None:
         return None
     if _container_client is None:
         _blob_client = BlobServiceClient.from_connection_string(BLOB_CONNECTION)
@@ -97,3 +102,26 @@ def load_merged_config(client_id, industry):
 
 
 
+
+def load_phone_mappings():
+    path = os.path.join(CONFIG_DIR, "phone_mappings.json")
+    if os.path.exists(path):
+        data = load_json(path)
+        mappings = data.get("mappings", {})
+        # Normalize mapping keys to improve matching (strip spaces, dashes, parentheses)
+        try:
+            import re
+            normalized = {}
+            for key, value in mappings.items():
+                if not isinstance(key, str):
+                    normalized[key] = value
+                    continue
+                cleaned = re.sub(r"[\s\-()]", "", key)
+                normalized[cleaned] = value
+                # Also include exact key if different
+                if cleaned != key:
+                    normalized[key] = value
+            return normalized
+        except Exception:
+            return mappings
+    return {}

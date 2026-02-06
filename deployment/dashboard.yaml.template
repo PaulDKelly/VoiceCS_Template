@@ -1,0 +1,31 @@
+location: uksouth
+properties:
+  configuration:
+    ingress:
+      external: true
+      targetPort: 3000
+      transport: auto
+    registries:
+    - server: ACR_LOGIN_SERVER_PLACEHOLDER
+      username: ACR_NAME_PLACEHOLDER
+      passwordSecretRef: acr-password
+  template:
+    containers:
+    - image: IMAGE_URI_PLACEHOLDER
+      name: workflow-manager
+      env:
+      - name: APP_CONFIG_PATH
+        value: /app/config
+      - name: NEXTAUTH_SECRET
+        value: NEXTAUTH_SECRET_PLACEHOLDER
+      - name: NEXTAUTH_URL
+        value: NEXTAUTH_URL_PLACEHOLDER
+      - name: TRUST_HOST
+        value: "true"
+      volumeMounts:
+      - mountPath: /app/config
+        volumeName: config-volume
+    volumes:
+    - name: config-volume
+      storageName: config-share
+      storageType: AzureFile
