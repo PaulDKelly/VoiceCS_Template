@@ -48,6 +48,12 @@ class TwilioBridge:
         # Start Azure STT
         self.recognizer.start_continuous_recognition()
         
+        # Get baseline from query params (passed from twilio_voice_handler in bot_main.py)
+        # We need to adapt the websocket object or check if it has query_params
+        # Since this is an adapter, we check if it has the attribute
+        query_client_id = getattr(websocket, "query_params", {}).get("client_id")
+        query_industry = getattr(websocket, "query_params", {}).get("industry")
+
         try:
             async for message in websocket.iter_text():
                 data = json.loads(message)
@@ -70,13 +76,40 @@ class TwilioBridge:
                     # Capture Context Parameters
                     custom_params = data["start"].get("customParameters", {})
                     from_number = custom_params.get("phone_number") or custom_params.get("From")
-                    client_id = custom_params.get("client_id")
-                    industry = custom_params.get("industry")
+                    client_id = custom_params.get("client_id") or query_client_id
+                    industry = custom_params.get("industry") or query_industry
                     
                     if from_number:
                          # Strip 'client:' prefix if testing from browser
                          if from_number.startswith("client:"):
                              from_number = from_number.replace("client:", "")
+
+                    # IF not resolved from query/custom, try to resolve via Phone Mapping (Source of Truth)
+                    # This handles cases where people call the bot directly without passing params
+                    if (not client_id or not industry) and from_number:
+                        from shared_code.utils.config_loader import load_phone_mappings
+                        mappings = load_phone_mappings()
+                        
+                        # Check strict match
+                        if from_number in mappings:
+                            client_data = mappings[from_number]
+                            client_id = client_data.get("client_id")
+                            industry = client_data.get("industry")
+                            logger.info(f"Resolved Client via Phone Mapping (Strict): {client_id}")
+                        else:
+                            # Check fuzzy match
+                            clean_number = from_number.lstrip('+')
+                            for k, v in mappings.items():
+                                if k.lstrip('+') == clean_number:
+                                    client_id = v.get("client_id")
+                                    industry = v.get("industry")
+                                    logger.info(f"Resolved Client via Phone Mapping (Fuzzy): {client_id}")
+                                    break
+                                     
+                    if (not client_id or not industry):
+                         logger.warning(f"No client_id or industry resolved. Using hard defaults.")
+                         client_id = client_id or os.getenv("CLIENT_ID", "autonova")
+                         industry = industry or os.getenv("INDUSTRY", "automotive")
                              
                     from shared_code.utils.session import load_session, save_session
                     session = load_session(self.session_id)

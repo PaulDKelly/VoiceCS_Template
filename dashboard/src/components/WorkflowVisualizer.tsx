@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import ReactFlow, {
     MiniMap,
     Controls,
@@ -25,29 +25,48 @@ interface WorkflowVisualizerProps {
 import { Handle, Position } from 'reactflow';
 
 // Custom Node Types
+const DefaultNode = ({ data }: { data: any }) => {
+    return (
+        <div className="px-2.5 py-1.5 shadow-md rounded bg-blue-600 min-w-[125px] text-center text-[12px]">
+            <Handle type="target" position={Position.Top} className="w-12 !bg-gray-500" />
+            <div className="font-semibold text-white">{data.label}</div>
+            <Handle type="source" position={Position.Bottom} className="w-12 !bg-gray-500" />
+        </div>
+    );
+};
+
+const InputNode = ({ data }: { data: any }) => {
+    return (
+        <div className="px-2.5 py-1.5 shadow-md rounded bg-green-900 min-w-[125px] text-center text-[12px]">
+            <div className="font-semibold text-green-100">{data.label}</div>
+            <Handle type="source" position={Position.Bottom} className="w-12 !bg-green-400" />
+        </div>
+    );
+};
+
 const HandoffNode = ({ data }: { data: any }) => {
     return (
-        <div className="px-4 py-2 shadow-md rounded-md bg-purple-900 border-2 border-purple-500 min-w-[150px] text-center">
-            <Handle type="target" position={Position.Top} className="w-16 !bg-purple-500" />
+        <div className="px-2.5 py-1 shadow-md rounded bg-purple-900 min-w-[130px] text-center text-[12px]">
+            <Handle type="target" position={Position.Top} className="w-12 !bg-purple-500" />
             <div className="flex items-center justify-center gap-2">
-                <span className="text-xl">↪️</span>
-                <div className="font-bold text-white">{data.label}</div>
+                <span className="text-[13px]">↪️</span>
+                <div className="font-semibold text-white">{data.label}</div>
             </div>
-            <div className="text-[10px] text-purple-300 mt-1">Alt-click to jump</div>
-            <Handle type="source" position={Position.Bottom} className="w-16 !bg-purple-500" />
+            <div className="text-[10px] text-purple-300 mt-0.5">Alt-click to jump</div>
+            <Handle type="source" position={Position.Bottom} className="w-12 !bg-purple-500" />
         </div>
     );
 };
 
 const ActionNode = ({ data }: { data: any }) => {
     return (
-        <div className="px-4 py-2 shadow-md rounded-md bg-blue-900 border-2 border-blue-400 min-w-[150px] text-center">
+        <div className="px-2.5 py-1.5 shadow-md rounded bg-blue-900 min-w-[125px] text-center text-[12px]">
             <Handle type="target" position={Position.Top} className=" !bg-blue-400" />
             <div className="flex items-center justify-center gap-2">
-                <span className="text-xl">⚡</span>
-                <div className="font-bold text-white text-sm">{data.label}</div>
+                <span className="text-[13px]">⚡</span>
+                <div className="font-semibold text-white text-[12px]">{data.label}</div>
             </div>
-            <div className={`text-[10px] mt-1 font-mono ${data.actionType === 'webhook' ? 'text-orange-300' : 'text-blue-200'}`}>
+            <div className={`text-[10px] mt-0.5 font-mono ${data.actionType === 'webhook' ? 'text-orange-300' : 'text-blue-200'}`}>
                 {data.actionType?.toUpperCase() || 'NO ACTION SET'}
             </div>
             <Handle type="source" position={Position.Bottom} className=" !bg-blue-400" />
@@ -56,6 +75,8 @@ const ActionNode = ({ data }: { data: any }) => {
 };
 
 const nodeTypes = {
+    custom: DefaultNode,
+    custom_input: InputNode,
     handoff: HandoffNode,
     action: ActionNode,
 };
@@ -80,6 +101,15 @@ export default function WorkflowVisualizer({ jsonContent, onChange, industryDefa
     const [newIntentName, setNewIntentName] = useState("");
 
     const [selectedWorkflowKey, setSelectedWorkflowKey] = useState<string | null>(null);
+    const [nodePanelPos, setNodePanelPos] = useState<{ x: number; y: number } | null>(null);
+    const [edgePanelPos, setEdgePanelPos] = useState<{ x: number; y: number } | null>(null);
+    const dragState = useRef<{
+        panel: 'node' | 'edge';
+        startX: number;
+        startY: number;
+        startLeft: number;
+        startTop: number;
+    } | null>(null);
 
     // Initial Load
     useEffect(() => {
@@ -105,17 +135,65 @@ export default function WorkflowVisualizer({ jsonContent, onChange, industryDefa
     useEffect(() => {
         if (selectedWorkflowKey && jsonContent.workflows && jsonContent.workflows[selectedWorkflowKey]) {
             const wf = jsonContent.workflows[selectedWorkflowKey];
-            setNodes(wf.nodes || []);
+            const normalizedNodes = (wf.nodes || []).map((node: any) => {
+                const nextType = !node.type || node.type === "default"
+                    ? "custom"
+                    : node.type === "input"
+                        ? "custom_input"
+                        : node.type;
+                return { ...node, type: nextType };
+            });
+            setNodes(normalizedNodes);
             setEdges(wf.edges || []);
         } else if (selectedWorkflowKey && industryDefaults?.workflows && industryDefaults.workflows[selectedWorkflowKey]) {
             const wf = industryDefaults.workflows[selectedWorkflowKey];
-            setNodes(wf.nodes || []);
+            const normalizedNodes = (wf.nodes || []).map((node: any) => {
+                const nextType = !node.type || node.type === "default"
+                    ? "custom"
+                    : node.type === "input"
+                        ? "custom_input"
+                        : node.type;
+                return { ...node, type: nextType };
+            });
+            setNodes(normalizedNodes);
             setEdges(wf.edges || []);
         } else {
             setNodes([]);
             setEdges([]);
         }
     }, [selectedWorkflowKey, setNodes, setEdges, industryDefaults]);
+
+    // One-time migration: ensure all nodes have a type persisted in JSON
+    useEffect(() => {
+        if (!jsonContent.workflows) return;
+        if (jsonContent.__node_types_migrated) return;
+
+        let changed = false;
+        const updatedWorkflows: Record<string, any> = {};
+
+        Object.entries(jsonContent.workflows || {}).forEach(([key, wf]: any) => {
+            const nodes = (wf.nodes || []).map((node: any) => {
+                if (!node.type || node.type === "default") {
+                    changed = true;
+                    return { ...node, type: "custom" };
+                }
+                if (node.type === "input") {
+                    changed = true;
+                    return { ...node, type: "custom_input" };
+                }
+                return node;
+            });
+            updatedWorkflows[key] = { ...wf, nodes };
+        });
+
+        if (changed) {
+            onChange({
+                ...jsonContent,
+                __node_types_migrated: true,
+                workflows: updatedWorkflows
+            });
+        }
+    }, [jsonContent, onChange]);
 
     // Auto-Sync to Parent
     useEffect(() => {
@@ -127,13 +205,16 @@ export default function WorkflowVisualizer({ jsonContent, onChange, industryDefa
             // Only sync if nodes/edges are populated (avoid syncing initial empty state over existing data)
             if (nodes.length === 0 && edges.length === 0) return;
 
-            const updatedWorkflows = {
-                ...workflows,
-                [selectedWorkflowKey]: {
-                    nodes,
-                    edges
-                }
-            };
+                        const updatedWorkflows = {
+                            ...workflows,
+                            [selectedWorkflowKey]: {
+                                nodes: nodes.map((node) => ({
+                                    ...node,
+                                    type: node.type === "default" ? "custom" : node.type
+                                })),
+                                edges
+                            }
+                        };
 
             onChange({
                 ...jsonContent,
@@ -171,6 +252,57 @@ export default function WorkflowVisualizer({ jsonContent, onChange, industryDefa
         setSelectedEdgeId(null);
     }, []);
 
+    useEffect(() => {
+        const onMove = (e: MouseEvent) => {
+            if (!dragState.current) return;
+            const { panel, startX, startY, startLeft, startTop } = dragState.current;
+            const nextX = Math.max(10, startLeft + (e.clientX - startX));
+            const nextY = Math.max(10, startTop + (e.clientY - startY));
+            if (panel === 'node') setNodePanelPos({ x: nextX, y: nextY });
+            if (panel === 'edge') setEdgePanelPos({ x: nextX, y: nextY });
+        };
+        const onUp = () => {
+            dragState.current = null;
+        };
+        window.addEventListener('mousemove', onMove);
+        window.addEventListener('mouseup', onUp);
+        return () => {
+            window.removeEventListener('mousemove', onMove);
+            window.removeEventListener('mouseup', onUp);
+        };
+    }, []);
+
+    const startDrag = (panel: 'node' | 'edge', event: React.MouseEvent) => {
+        event.preventDefault();
+        const pos = panel === 'node' ? nodePanelPos : edgePanelPos;
+        if (!pos) return;
+        dragState.current = {
+            panel,
+            startX: event.clientX,
+            startY: event.clientY,
+            startLeft: pos.x,
+            startTop: pos.y
+        };
+    };
+
+    useEffect(() => {
+        if (selectedNodeId && !nodePanelPos && typeof window !== 'undefined') {
+            setNodePanelPos({
+                x: Math.max(20, Math.floor(window.innerWidth / 2 - 160)),
+                y: Math.max(20, Math.floor(window.innerHeight / 2 - 220))
+            });
+        }
+    }, [selectedNodeId, nodePanelPos]);
+
+    useEffect(() => {
+        if (selectedEdgeId && !edgePanelPos && typeof window !== 'undefined') {
+            setEdgePanelPos({
+                x: Math.max(20, Math.floor(window.innerWidth / 2 - 160)),
+                y: Math.max(20, Math.floor(window.innerHeight / 2 - 220))
+            });
+        }
+    }, [selectedEdgeId, edgePanelPos]);
+
     // CRUD Operations
     const handleAddNode = () => {
         const newId = (Math.random() * 10000).toFixed(0);
@@ -178,7 +310,7 @@ export default function WorkflowVisualizer({ jsonContent, onChange, industryDefa
             id: newId,
             position: { x: 250, y: 100 + (nodes.length * 50) },
             data: { label: `New Step` },
-            type: 'default'
+            type: 'custom'
         };
         setNodes((nds) => nds.concat(newNode));
         setSelectedNodeId(newId);
@@ -249,7 +381,7 @@ export default function WorkflowVisualizer({ jsonContent, onChange, industryDefa
                 targetWorkflow: type === 'handoff' ? '' : undefined,
                 actionType: type === 'action' ? 'email' : undefined
             },
-            type: type
+            type: type === 'default' ? 'custom' : type
         };
 
         const newEdge: Edge = {
@@ -413,7 +545,7 @@ export default function WorkflowVisualizer({ jsonContent, onChange, industryDefa
         } else {
             // 3. Create fresh
             updatedWorkflows[name] = {
-                nodes: [{ id: '1', position: { x: 250, y: 50 }, data: { label: `Start ${name}` }, type: 'input' }],
+                nodes: [{ id: '1', position: { x: 250, y: 50 }, data: { label: `Start ${name}` }, type: 'custom_input' }],
                 edges: []
             };
         }
@@ -453,6 +585,24 @@ export default function WorkflowVisualizer({ jsonContent, onChange, industryDefa
 
     return (
         <div className="h-full w-full bg-gray-900 border border-gray-700 rounded relative flex flex-col">
+            <style jsx global>{`
+                .react-flow__node,
+                .react-flow__node-default,
+                .react-flow__node-input,
+                .react-flow__node-output,
+                .react-flow__node-group {
+                    border: none !important;
+                    outline: none !important;
+                    box-shadow: none !important;
+                }
+                .react-flow__node.selected,
+                .react-flow__node:focus,
+                .react-flow__node:focus-visible {
+                    border: none !important;
+                    outline: none !important;
+                    box-shadow: none !important;
+                }
+            `}</style>
             {/* Tab Bar */}
             <div className="flex bg-gray-800 border-b border-gray-700 px-2 pt-2 gap-1 overflow-x-auto">
                 {workflowKeys.map(key => (
@@ -580,9 +730,15 @@ export default function WorkflowVisualizer({ jsonContent, onChange, industryDefa
                 </div>
 
                 {/* Edit Panel (Node) */}
-                {selectedNode && (
-                    <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-80 bg-gray-800 border-2 border-blue-500 rounded-lg shadow-xl p-4 z-20 flex flex-col gap-3">
-                        <div className="flex justify-between items-center border-b border-gray-700 pb-2">
+                {selectedNode && nodePanelPos && (
+                    <div
+                        className="absolute w-80 bg-gray-800 border-2 border-blue-500 rounded-lg shadow-xl p-4 z-20 flex flex-col gap-3"
+                        style={{ left: nodePanelPos.x, top: nodePanelPos.y }}
+                    >
+                        <div
+                            className="flex justify-between items-center border-b border-gray-700 pb-2 cursor-move"
+                            onMouseDown={(e) => startDrag('node', e)}
+                        >
                             <span className="text-sm font-bold text-blue-400">Edit Node ({selectedNodeId})</span>
                             <button onClick={() => setSelectedNodeId(null)} className="text-gray-400 hover:text-white">
                                 <X size={16} />
@@ -819,9 +975,15 @@ export default function WorkflowVisualizer({ jsonContent, onChange, industryDefa
                 )}
 
                 {/* Edit Panel (Edge) */}
-                {selectedEdgeId && (
-                    <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-80 bg-gray-800 border-2 border-yellow-500 rounded-lg shadow-xl p-4 z-20 flex flex-col gap-3">
-                        <div className="flex justify-between items-center border-b border-gray-700 pb-2">
+                {selectedEdgeId && edgePanelPos && (
+                    <div
+                        className="absolute w-80 bg-gray-800 border-2 border-yellow-500 rounded-lg shadow-xl p-4 z-20 flex flex-col gap-3"
+                        style={{ left: edgePanelPos.x, top: edgePanelPos.y }}
+                    >
+                        <div
+                            className="flex justify-between items-center border-b border-gray-700 pb-2 cursor-move"
+                            onMouseDown={(e) => startDrag('edge', e)}
+                        >
                             <span className="text-sm font-bold text-yellow-500">Edit Connection</span>
                             <button onClick={() => setSelectedEdgeId(null)} className="text-gray-400 hover:text-white">
                                 <X size={16} />

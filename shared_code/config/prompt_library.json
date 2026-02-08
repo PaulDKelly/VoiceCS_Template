@@ -6,13 +6,25 @@
             "text": "You are a helpful and polite voice assistant. Your goal is to assist the caller with their inquiries efficiently. Always be courteous and patient."
         },
         {
-            "name": "Initial Greeting",
+            "name": "Hi, I'm {agent_name}",
+            "category": "First Response",
+            "suggested_key": "first_response_greeting",
+            "text": "Hi, I'm {assistant} with {brand}. Before we get into the details, can I take your name?"
+        },
+        {
+            "name": "How can I help you {name}",
+            "category": "First Response",
+            "suggested_key": "first_response_ask_intent",
+            "text": "How can I help you today, {name}?"
+        },
+        {
+            "name": "Initial Greeting (Legacy)",
             "category": "Standard Interaction",
             "suggested_key": "system_greeting",
             "text": "Hi, I'm {assistant} with {brand}. Before we get into the details, can I take your name?"
         },
         {
-            "name": "Ask Intent (with name)",
+            "name": "Ask Intent (Legacy)",
             "category": "Standard Interaction",
             "suggested_key": "ask_intent_with_name",
             "text": "How can I help you today, {name}?"

@@ -111,7 +111,8 @@ def _process_node(node_id: str, nodes: list, edges: list, session: dict, config:
                 session["current_node_id"] = None
                 save_session(session_id, session)
                 from shared_code.agent.workflow_router import route_to_workflow
-                result = route_to_workflow(target_intent, session_id, text)
+                last_text = session.get("_last_user_input", "") or ""
+                result = route_to_workflow(target_intent, session_id, last_text)
                 result["handoff_complete"] = True
                 return result
         # Actions are transparent to the user, move to next node immediately

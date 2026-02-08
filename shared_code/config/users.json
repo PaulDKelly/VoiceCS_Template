@@ -1,24 +1,66 @@
 {
-    "users": [
-        {
-            "id": "1",
-            "username": "admin",
-            "password_hash": "$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWrn96pzkZePnEJ.LqcXMsg/m/3O6i",
-            "role": "admin",
-            "allowed_clients": [
-                "*"
-            ],
-            "name": "Super Admin"
-        },
-        {
-            "id": "2",
-            "username": "autonova_user",
-            "password_hash": "$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWrn96pzkZePnEJ.LqcXMsg/m/3O6i",
-            "role": "user",
-            "allowed_clients": [
-                "autonova"
-            ],
-            "name": "Autonova Rep"
-        }
-    ]
+  "users": [
+    {
+      "id": "1",
+      "username": "admin",
+      "password_hash": "$2b$12$9g38kdNqCL97q2t9mH4DUO1efynaYr44Ml4IVdNUIvHROAWD3xQGm",
+      "role": "admin",
+      "allowed_clients": [
+        "*"
+      ],
+      "allowed_industries": [
+        "*"
+      ],
+      "permissions": {
+        "can_edit_clients": true,
+        "can_edit_industries": true,
+        "can_view_phone_mappings": true,
+        "can_edit_phone_mappings": true,
+        "can_manage_users": true,
+        "can_view_history": true,
+        "can_revert_history": true
+      },
+      "name": "Super Admin"
+    },
+    {
+      "id": "2",
+      "username": "autonova_user",
+      "password_hash": "$2b$12$9g38kdNqCL97q2t9mH4DUO1efynaYr44Ml4IVdNUIvHROAWD3xQGm",
+      "role": "user",
+      "allowed_clients": [
+        "autonova"
+      ],
+      "allowed_industries": [],
+      "permissions": {
+        "can_edit_clients": true,
+        "can_edit_industries": false,
+        "can_view_phone_mappings": false,
+        "can_edit_phone_mappings": false,
+        "can_manage_users": false,
+        "can_view_history": true,
+        "can_revert_history": false
+      },
+      "name": "Autonova Rep"
+    },
+    {
+      "id": "1770372130428",
+      "username": "autoadmin",
+      "password_hash": "$2b$10$iVkHJcXqopYT85U5SnscS.ZesknKb0LoZCHupAmg97SrcaDeov/mi",
+      "name": "Automotive Administrator",
+      "role": "admin",
+      "allowed_clients": [],
+      "allowed_industries": [
+        "automotive"
+      ],
+      "permissions": {
+        "can_edit_clients": true,
+        "can_edit_industries": false,
+        "can_view_phone_mappings": false,
+        "can_edit_phone_mappings": false,
+        "can_manage_users": false,
+        "can_view_history": true,
+        "can_revert_history": false
+      }
+    }
+  ]
 }
