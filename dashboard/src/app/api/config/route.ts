@@ -290,11 +290,11 @@ export async function POST(req: NextRequest) {
             if (fs.existsSync(targetPath)) return NextResponse.json({ error: 'Client already exists' }, { status: 409 });
 
             // Default content
-            let initialContent = { client_id: newName, industry };
+            let initialContent: Record<string, any> = { client_id: newName, industry };
             try {
                 const defaultsPath = getIndustryConfigPath(industry);
                 if (fs.existsSync(defaultsPath)) {
-                    initialContent = JSON.parse(fs.readFileSync(defaultsPath, 'utf-8'));
+                    initialContent = JSON.parse(fs.readFileSync(defaultsPath, 'utf-8')) as Record<string, any>;
                     initialContent.client_id = newName;
                 }
             } catch (e) { }

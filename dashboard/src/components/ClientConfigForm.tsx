@@ -55,7 +55,7 @@ type VoiceEntry = {
     provider: "elevenlabs" | "azure_neural";
     voice_id?: string;
     voice_name?: string;
-    default?: boolean;
+    default: boolean;
 };
 
 export default function ClientConfigForm({ jsonContent, onChange, assignedPhoneNumber, canManageVoiceLibrary }: Props) {
@@ -141,7 +141,11 @@ export default function ClientConfigForm({ jsonContent, onChange, assignedPhoneN
                     setVoiceLibrary([]);
                     return;
                 }
-                setVoiceLibrary((data && data.voices) || []);
+                const normalized = ((data && data.voices) || []).map((v: any) => ({
+                    ...v,
+                    default: !!v.default,
+                })) as VoiceEntry[];
+                setVoiceLibrary(normalized);
             } catch (err) {
                 console.error("Failed to load voice library", err);
                 setVoiceLibraryError("Failed to load voice library");
@@ -590,9 +594,10 @@ export default function ClientConfigForm({ jsonContent, onChange, assignedPhoneN
                                                     setVoiceLibraryError("Please fill in all required fields for the new voice.");
                                                     return;
                                                 }
-                                                const nextVoices = newVoice.default
-                                                    ? voiceLibrary.map(v => ({ ...v, default: false })).concat(newVoice)
-                                                    : voiceLibrary.concat(newVoice);
+                                                const normalizedNewVoice: VoiceEntry = { ...newVoice, default: !!newVoice.default };
+                                                const nextVoices = normalizedNewVoice.default
+                                                    ? voiceLibrary.map(v => ({ ...v, default: false })).concat(normalizedNewVoice)
+                                                    : voiceLibrary.concat(normalizedNewVoice);
                                                 const res = await fetch("/api/config", {
                                                     method: "POST",
                                                     body: JSON.stringify({ action: "save", type: "voice_library", content: { voices: nextVoices } })
