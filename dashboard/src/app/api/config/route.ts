@@ -139,6 +139,37 @@ async function importAzureGbVoices() {
 }
 
 async function importElevenLabsVoices() {
+    const importFromClientConfigs = () => {
+        const root = path.join(getConfigPath(), "clients");
+        const ids = new Set<string>();
+        const walk = (dir: string) => {
+            if (!fs.existsSync(dir)) return;
+            const entries = fs.readdirSync(dir, { withFileTypes: true });
+            for (const entry of entries) {
+                const p = path.join(dir, entry.name);
+                if (entry.isDirectory()) {
+                    walk(p);
+                    continue;
+                }
+                if (!entry.isFile() || !entry.name.endsWith(".json")) continue;
+                try {
+                    const parsed = JSON.parse(fs.readFileSync(p, "utf-8"));
+                    const id = String(parsed?.elevenlabs_voice_id || "").trim();
+                    if (id) ids.add(id);
+                } catch {
+                    // skip unreadable client config
+                }
+            }
+        };
+        walk(root);
+        return Array.from(ids).map((id) => ({
+            provider: "elevenlabs" as const,
+            voice_id: id,
+            name: id,
+            default: false,
+        }));
+    };
+
     const key = process.env.ELEVENLABS_API_KEY;
     if (!key) {
         throw new Error("ELEVENLABS_API_KEY is not configured on the server.");
@@ -150,6 +181,11 @@ async function importElevenLabsVoices() {
     });
     if (!res.ok) {
         const txt = await res.text().catch(() => "");
+        // Common in production where key can synthesize but lacks voices_read permission.
+        if (res.status === 401 && txt.includes("missing_permissions") && txt.includes("voices_read")) {
+            const fallback = importFromClientConfigs();
+            if (fallback.length > 0) return fallback;
+        }
         throw new Error(`ElevenLabs voices import failed (${res.status}): ${txt || res.statusText}`);
     }
 
