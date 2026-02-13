@@ -1,0 +1,17 @@
+{
+  "voices": [
+    {
+      "name": "Thirsty Work (ElevenLabs)",
+      "provider": "elevenlabs",
+      "voice_id": "MzqUf1HbJ8UmQ0wUsx2p",
+      "default": true
+    },
+    {
+      "name": "Azure Libby (UK)",
+      "provider": "azure_neural",
+      "voice_name": "en-GB-LibbyNeural",
+      "default": false
+    }
+  ]
+}
+
