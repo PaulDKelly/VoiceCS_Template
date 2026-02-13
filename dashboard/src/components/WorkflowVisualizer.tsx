@@ -20,6 +20,7 @@ interface WorkflowVisualizerProps {
     jsonContent: any;
     onChange: (newContent: any) => void;
     industryDefaults?: any;
+    onOpenPrompts?: () => void;
 }
 
 import { Handle, Position } from 'reactflow';
@@ -86,7 +87,7 @@ const initialNodes = [
 ];
 const initialEdges: Edge[] = [];
 
-export default function WorkflowVisualizer({ jsonContent, onChange, industryDefaults }: WorkflowVisualizerProps) {
+export default function WorkflowVisualizer({ jsonContent, onChange, industryDefaults, onOpenPrompts }: WorkflowVisualizerProps) {
     const [nodes, setNodes, onNodesChange] = useNodesState([]);
     const [edges, setEdges, onEdgesChange] = useEdgesState([]);
 
@@ -95,6 +96,9 @@ export default function WorkflowVisualizer({ jsonContent, onChange, industryDefa
     const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
     const [nodeLabel, setNodeLabel] = useState<string>("");
     const [edgeLabel, setEdgeLabel] = useState<string>("");
+    const [newPromptKey, setNewPromptKey] = useState<string>("");
+    const [newPromptText, setNewPromptText] = useState<string>("");
+    const [promptError, setPromptError] = useState<string>("");
 
     // Modal State
     const [showIntentModal, setShowIntentModal] = useState(false);
@@ -446,6 +450,60 @@ export default function WorkflowVisualizer({ jsonContent, onChange, industryDefa
         );
     };
 
+    const handlePromptKeyWithNameChange = (newKey: string) => {
+        setNodes((nds) =>
+            nds.map((node) => {
+                if (node.id === selectedNodeId) {
+                    return { ...node, data: { ...node.data, promptKeyWithName: newKey } };
+                }
+                return node;
+            })
+        );
+    };
+
+    const resetPromptDraft = () => {
+        setNewPromptKey("");
+        setNewPromptText("");
+        setPromptError("");
+    };
+
+    const saveNewPrompt = () => {
+        const key = newPromptKey.trim();
+        const text = newPromptText.trim();
+        if (!key) {
+            setPromptError("Prompt key is required.");
+            return;
+        }
+        if (promptKeysAll.includes(key)) {
+            setPromptError("Prompt key already exists.");
+            return;
+        }
+        if (!text) {
+            setPromptError("Prompt text is required.");
+            return;
+        }
+
+        const currentPrompts = jsonContent.prompts || {};
+        onChange({
+            ...jsonContent,
+            prompts: {
+                ...currentPrompts,
+                [key]: text
+            }
+        });
+        handlePromptKeyChange(key);
+        resetPromptDraft();
+    };
+
+    const duplicatePrompt = () => {
+        const sourceKey = selectedNode?.data?.promptKey || "";
+        const sourceText = jsonContent.prompts?.[sourceKey] || "";
+        const suggestedKey = sourceKey ? `${sourceKey}_copy` : "";
+        setNewPromptKey(suggestedKey);
+        setNewPromptText(sourceText);
+        setPromptError("Edit the text before saving a duplicate.");
+    };
+
     const handleActionChange = (field: string, value: any) => {
         setNodes((nds) =>
             nds.map((node) => {
@@ -481,21 +539,6 @@ export default function WorkflowVisualizer({ jsonContent, onChange, industryDefa
                 return node;
             })
         );
-    };
-
-    const handlePromptTextChange = (newText: string) => {
-        const key = selectedNode?.data?.promptKey;
-        if (!key) return;
-
-        const currentPrompts = jsonContent.prompts || {};
-
-        onChange({
-            ...jsonContent,
-            prompts: {
-                ...currentPrompts,
-                [key]: newText
-            }
-        });
     };
 
     // Connections
@@ -580,7 +623,21 @@ export default function WorkflowVisualizer({ jsonContent, onChange, industryDefa
     // Ensure first_response is always in the list if available in defaults
     const defaultWorkflows = industryDefaults?.workflows ? Object.keys(industryDefaults.workflows) : [];
     const workflowKeys = Array.from(new Set([...contentWorkflows, ...defaultWorkflows]));
-    const promptKeys = jsonContent.prompts ? Object.keys(jsonContent.prompts) : [];
+    const promptKeysAll = jsonContent.prompts ? Object.keys(jsonContent.prompts) : [];
+    const promptKeysByIntent = selectedWorkflowKey
+        ? promptKeysAll.filter(k => k === selectedWorkflowKey || k.startsWith(`${selectedWorkflowKey}_`))
+        : promptKeysAll;
+    const usedPromptKeys = new Set<string>();
+    nodes.forEach((node: any) => {
+        const pk = node?.data?.promptKey;
+        const pkWithName = node?.data?.promptKeyWithName;
+        if (pk) usedPromptKeys.add(pk);
+        if (pkWithName) usedPromptKeys.add(pkWithName);
+    });
+    const promptKeys = Array.from(new Set([
+        ...promptKeysByIntent,
+        ...Array.from(usedPromptKeys).filter(k => promptKeysAll.includes(k))
+    ]));
     const selectedNode = nodes.find(n => n.id === selectedNodeId);
 
     return (
@@ -791,6 +848,8 @@ export default function WorkflowVisualizer({ jsonContent, onChange, industryDefa
                                         <option value="email">Send Email</option>
                                         <option value="sms">Send SMS</option>
                                         <option value="webhook">API Webhook</option>
+                                        <option value="whisper">Whisper (Call Manager)</option>
+                                        <option value="database_query">Database Query</option>
                                         <option value="detect_intent">Detect Intent</option>
                                     </select>
                                     {isLockedAction && (
@@ -837,6 +896,114 @@ export default function WorkflowVisualizer({ jsonContent, onChange, industryDefa
                                         value={selectedNode.data.actionConfig?.url || ""}
                                         onChange={(e) => handleActionConfigChange("url", e.target.value)}
                                     />
+                                )}
+
+                                {selectedNode.data.actionType === 'whisper' && (
+                                    <div className="space-y-2">
+                                        <input
+                                            type="text"
+                                            className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs"
+                                            placeholder="Target Number (optional)"
+                                            value={selectedNode.data.actionConfig?.target_number || ""}
+                                            onChange={(e) => handleActionConfigChange("target_number", e.target.value)}
+                                        />
+                                        <textarea
+                                            className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs"
+                                            placeholder="Message (supports {assistant}, {brand}, {name}, {phone})"
+                                            rows={3}
+                                            value={selectedNode.data.actionConfig?.message || ""}
+                                            onChange={(e) => handleActionConfigChange("message", e.target.value)}
+                                        />
+                                    </div>
+                                )}
+
+                                {selectedNode.data.actionType === 'database_query' && (
+                                    <div className="space-y-2">
+                                        <label className="text-[10px] text-gray-400 mb-1 block">Connection</label>
+                                        <select
+                                            className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs focus:border-blue-500 outline-none"
+                                            value={selectedNode.data.actionConfig?.connection_ref || ""}
+                                            onChange={(e) => handleActionConfigChange("connection_ref", e.target.value)}
+                                        >
+                                            <option value="">-- None (Use Override) --</option>
+                                            {Object.keys(jsonContent.database_connections || {}).map(k => (
+                                                <option key={k} value={k}>{k}</option>
+                                            ))}
+                                        </select>
+                                        <label className="text-[10px] text-gray-400 mb-1 block">DB Type (optional override)</label>
+                                        <select
+                                            className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs focus:border-blue-500 outline-none"
+                                            value={selectedNode.data.actionConfig?.database_type || ""}
+                                            onChange={(e) => handleActionConfigChange("database_type", e.target.value)}
+                                        >
+                                            <option value="">-- From Connection --</option>
+                                            <option value="postgres">PostgreSQL</option>
+                                            <option value="mysql">MySQL</option>
+                                            <option value="sqlserver">SQL Server</option>
+                                            <option value="sqlite">SQLite</option>
+                                            <option value="custom">Custom</option>
+                                        </select>
+                                        <input
+                                            type="text"
+                                            className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs"
+                                            placeholder="Connection String (optional override)"
+                                            value={selectedNode.data.actionConfig?.connection_string || ""}
+                                            onChange={(e) => handleActionConfigChange("connection_string", e.target.value)}
+                                        />
+                                        <input
+                                            type="text"
+                                            className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs"
+                                            placeholder="SQLite Path (optional override)"
+                                            value={selectedNode.data.actionConfig?.sqlite_path || ""}
+                                            onChange={(e) => handleActionConfigChange("sqlite_path", e.target.value)}
+                                        />
+                                        <textarea
+                                            className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs"
+                                            placeholder="SQL query with variables, e.g. SELECT * FROM customers WHERE phone = {phone_number}"
+                                            rows={4}
+                                            value={selectedNode.data.actionConfig?.query_template || ""}
+                                            onChange={(e) => handleActionConfigChange("query_template", e.target.value)}
+                                        />
+                                        <input
+                                            type="text"
+                                            className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs"
+                                            placeholder="Result Variable (default: db_result)"
+                                            value={selectedNode.data.actionConfig?.result_var || ""}
+                                            onChange={(e) => handleActionConfigChange("result_var", e.target.value)}
+                                        />
+                                        <div className="grid grid-cols-2 gap-2">
+                                            <input
+                                                type="number"
+                                                className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs"
+                                                placeholder="Max Rows (default 10)"
+                                                value={selectedNode.data.actionConfig?.max_rows ?? ""}
+                                                onChange={(e) => handleActionConfigChange("max_rows", e.target.value === "" ? "" : parseInt(e.target.value, 10) || 10)}
+                                            />
+                                            <input
+                                                type="number"
+                                                className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs"
+                                                placeholder="Timeout sec (default 5)"
+                                                value={selectedNode.data.actionConfig?.timeout_seconds ?? ""}
+                                                onChange={(e) => handleActionConfigChange("timeout_seconds", e.target.value === "" ? "" : parseFloat(e.target.value) || 5)}
+                                            />
+                                        </div>
+                                        <label className="text-[10px] text-gray-300 flex items-center gap-2">
+                                            <input
+                                                type="checkbox"
+                                                checked={!!selectedNode.data.actionConfig?.single_row}
+                                                onChange={(e) => handleActionConfigChange("single_row", e.target.checked)}
+                                                className="accent-blue-500"
+                                            />
+                                            Store single row only
+                                        </label>
+                                        <input
+                                            type="text"
+                                            className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs"
+                                            placeholder="Error Prompt (optional)"
+                                            value={selectedNode.data.actionConfig?.error_prompt || ""}
+                                            onChange={(e) => handleActionConfigChange("error_prompt", e.target.value)}
+                                        />
+                                    </div>
                                 )}
 
                                 {selectedNode.data.actionType === 'detect_intent' && (
@@ -953,14 +1120,96 @@ export default function WorkflowVisualizer({ jsonContent, onChange, industryDefa
                                 ))}
                             </select>
 
+                            <label className="text-xs text-blue-300 uppercase font-semibold">Prompt When Name Known (optional)</label>
+                            <select
+                                className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white mt-1 mb-2 text-xs focus:border-blue-500 outline-none"
+                                value={selectedNode.data.promptKeyWithName || ""}
+                                onChange={(e) => handlePromptKeyWithNameChange(e.target.value)}
+                            >
+                                <option value="">-- Use Linked Prompt --</option>
+                                {promptKeys.map(k => (
+                                    <option key={k} value={k}>{k}</option>
+                                ))}
+                            </select>
+
                             {selectedNode.data.promptKey && (
-                                <textarea
-                                    className="w-full h-24 bg-gray-900 border border-gray-600 rounded p-2 text-xs text-gray-300 font-mono resize-none focus:border-blue-500 outline-none"
-                                    value={jsonContent.prompts?.[selectedNode.data.promptKey] || ""}
-                                    onChange={(e) => handlePromptTextChange(e.target.value)}
-                                    placeholder="Prompt text..."
-                                />
+                                <>
+                                    <textarea
+                                        className="w-full h-24 bg-gray-900 border border-gray-600 rounded p-2 text-xs text-gray-400 font-mono resize-none outline-none"
+                                        value={jsonContent.prompts?.[selectedNode.data.promptKey] || ""}
+                                        placeholder="Prompt text..."
+                                        readOnly
+                                    />
+                                    {selectedNode.data.promptKeyWithName && (
+                                        <textarea
+                                            className="w-full h-24 bg-gray-900 border border-gray-600 rounded p-2 text-xs text-gray-400 font-mono resize-none outline-none mt-2"
+                                            value={jsonContent.prompts?.[selectedNode.data.promptKeyWithName] || ""}
+                                            placeholder="Prompt text when name is known..."
+                                            readOnly
+                                        />
+                                    )}
+                                    <div className="text-[10px] text-gray-500 mt-1">
+                                        Prompts are edited in the Prompts tab to keep them reusable.
+                                    </div>
+                                    {onOpenPrompts && (
+                                        <button
+                                            onClick={onOpenPrompts}
+                                            className="mt-2 w-full bg-gray-700 hover:bg-gray-600 text-xs py-1 rounded text-white"
+                                        >
+                                            Open Prompts Tab
+                                        </button>
+                                    )}
+                                </>
                             )}
+
+                            <div className="pt-3 border-t border-gray-700 mt-3">
+                                <div className="text-xs text-gray-400 mb-2">Create / Duplicate Prompt (local)</div>
+                                <div className="flex gap-2 mb-2">
+                                    <button
+                                        onClick={duplicatePrompt}
+                                        className="flex-1 bg-gray-700 hover:bg-gray-600 text-xs py-1 rounded text-white"
+                                    >
+                                        Duplicate Current
+                                    </button>
+                                    <button
+                                        onClick={resetPromptDraft}
+                                        className="flex-1 bg-gray-800 hover:bg-gray-700 text-xs py-1 rounded text-white"
+                                    >
+                                        New Blank
+                                    </button>
+                                </div>
+                                <input
+                                    type="text"
+                                    className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs"
+                                    placeholder={`${selectedWorkflowKey || "intent"}_prompt_key`}
+                                    value={newPromptKey}
+                                    onChange={(e) => setNewPromptKey(e.target.value)}
+                                />
+                                <textarea
+                                    className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs mt-2"
+                                    placeholder="Prompt text..."
+                                    rows={3}
+                                    value={newPromptText}
+                                    onChange={(e) => setNewPromptText(e.target.value)}
+                                />
+                                {promptError && (
+                                    <div className="text-[10px] text-red-400 mt-1">{promptError}</div>
+                                )}
+                                <button
+                                    onClick={() => {
+                                        const sourceKey = selectedNode?.data?.promptKey || "";
+                                        const sourceText = jsonContent.prompts?.[sourceKey] || "";
+                                        if (sourceKey && newPromptText.trim() === sourceText.trim()) {
+                                            setPromptError("Duplicate must be edited before saving.");
+                                            return;
+                                        }
+                                        saveNewPrompt();
+                                    }}
+                                    className="mt-2 w-full bg-blue-700 hover:bg-blue-600 text-xs py-1 rounded text-white"
+                                >
+                                    Save Prompt Locally
+                                </button>
+                            </div>
                         </div>
 
                         <div className="pt-2 flex justify-between">

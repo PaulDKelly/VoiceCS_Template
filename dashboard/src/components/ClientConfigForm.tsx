@@ -43,6 +43,17 @@ type ClientConfig = {
         question_mode: string;
         max_follow_ups: number;
     }>;
+    database_connections?: Record<string, {
+        type?: string;
+        host?: string;
+        port?: number | string;
+        database?: string;
+        username?: string;
+        password?: string;
+        password_env?: string;
+        connection_string?: string;
+        sqlite_path?: string;
+    }>;
     [key: string]: any;
 };
 
@@ -861,6 +872,201 @@ export default function ClientConfigForm({ jsonContent, onChange, assignedPhoneN
                             {whisperTestError && (
                                 <div className="text-xs text-red-400 mt-1">{whisperTestError}</div>
                             )}
+                        </div>
+                    </div>
+                </section>
+
+                {/* Workflow Behavior */}
+                <section className="bg-gray-800 rounded-lg p-6 border border-gray-700">
+                    <h3 className="text-lg font-semibold text-blue-400 mb-4">Database Connections</h3>
+                    <p className="text-sm text-gray-400 mb-4">
+                        Create reusable database connections for Database Query action nodes.
+                    </p>
+                    <div className="space-y-4">
+                        {Object.entries(config.database_connections || {}).map(([connKey, conn]: any) => (
+                            <div key={`db-conn-${connKey}`} className="p-4 bg-gray-900 rounded border border-gray-700">
+                                <div className="flex items-center justify-between mb-3">
+                                    <div className="text-sm font-semibold text-white">{connKey}</div>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            const next = { ...(config.database_connections || {}) };
+                                            delete next[connKey];
+                                            handleChange("database_connections", next);
+                                        }}
+                                        className="text-xs px-2 py-1 rounded bg-red-800 hover:bg-red-700 text-white"
+                                    >
+                                        Remove
+                                    </button>
+                                </div>
+                                <div className="grid grid-cols-2 gap-3">
+                                    <div>
+                                        <label className="block text-xs text-gray-400 mb-1">Type</label>
+                                        <select
+                                            value={conn.type || "postgres"}
+                                            onChange={(e) => {
+                                                const next = {
+                                                    ...(config.database_connections || {}),
+                                                    [connKey]: { ...(conn || {}), type: e.target.value }
+                                                };
+                                                handleChange("database_connections", next);
+                                            }}
+                                            className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-white text-sm"
+                                        >
+                                            <option value="postgres">PostgreSQL</option>
+                                            <option value="mysql">MySQL</option>
+                                            <option value="sqlserver">SQL Server</option>
+                                            <option value="sqlite">SQLite</option>
+                                            <option value="custom">Custom</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs text-gray-400 mb-1">Connection String</label>
+                                        <input
+                                            type="text"
+                                            value={conn.connection_string || ""}
+                                            onChange={(e) => {
+                                                const next = {
+                                                    ...(config.database_connections || {}),
+                                                    [connKey]: { ...(conn || {}), connection_string: e.target.value }
+                                                };
+                                                handleChange("database_connections", next);
+                                            }}
+                                            className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-white text-sm"
+                                            placeholder="Optional DSN/ODBC/URI"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs text-gray-400 mb-1">Host</label>
+                                        <input
+                                            type="text"
+                                            value={conn.host || ""}
+                                            onChange={(e) => {
+                                                const next = {
+                                                    ...(config.database_connections || {}),
+                                                    [connKey]: { ...(conn || {}), host: e.target.value }
+                                                };
+                                                handleChange("database_connections", next);
+                                            }}
+                                            className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-white text-sm"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs text-gray-400 mb-1">Port</label>
+                                        <input
+                                            type="text"
+                                            value={conn.port || ""}
+                                            onChange={(e) => {
+                                                const next = {
+                                                    ...(config.database_connections || {}),
+                                                    [connKey]: { ...(conn || {}), port: e.target.value }
+                                                };
+                                                handleChange("database_connections", next);
+                                            }}
+                                            className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-white text-sm"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs text-gray-400 mb-1">Database</label>
+                                        <input
+                                            type="text"
+                                            value={conn.database || ""}
+                                            onChange={(e) => {
+                                                const next = {
+                                                    ...(config.database_connections || {}),
+                                                    [connKey]: { ...(conn || {}), database: e.target.value }
+                                                };
+                                                handleChange("database_connections", next);
+                                            }}
+                                            className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-white text-sm"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs text-gray-400 mb-1">SQLite Path</label>
+                                        <input
+                                            type="text"
+                                            value={conn.sqlite_path || ""}
+                                            onChange={(e) => {
+                                                const next = {
+                                                    ...(config.database_connections || {}),
+                                                    [connKey]: { ...(conn || {}), sqlite_path: e.target.value }
+                                                };
+                                                handleChange("database_connections", next);
+                                            }}
+                                            className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-white text-sm"
+                                            placeholder="For sqlite only"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs text-gray-400 mb-1">Username</label>
+                                        <input
+                                            type="text"
+                                            value={conn.username || ""}
+                                            onChange={(e) => {
+                                                const next = {
+                                                    ...(config.database_connections || {}),
+                                                    [connKey]: { ...(conn || {}), username: e.target.value }
+                                                };
+                                                handleChange("database_connections", next);
+                                            }}
+                                            className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-white text-sm"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs text-gray-400 mb-1">Password</label>
+                                        <input
+                                            type="password"
+                                            value={conn.password || ""}
+                                            onChange={(e) => {
+                                                const next = {
+                                                    ...(config.database_connections || {}),
+                                                    [connKey]: { ...(conn || {}), password: e.target.value }
+                                                };
+                                                handleChange("database_connections", next);
+                                            }}
+                                            className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-white text-sm"
+                                            placeholder="Optional; prefer Password Env"
+                                        />
+                                    </div>
+                                    <div className="col-span-2">
+                                        <label className="block text-xs text-gray-400 mb-1">Password Env Var</label>
+                                        <input
+                                            type="text"
+                                            value={conn.password_env || ""}
+                                            onChange={(e) => {
+                                                const next = {
+                                                    ...(config.database_connections || {}),
+                                                    [connKey]: { ...(conn || {}), password_env: e.target.value }
+                                                };
+                                                handleChange("database_connections", next);
+                                            }}
+                                            className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-white text-sm"
+                                            placeholder="Recommended (e.g. DB_PASSWORD_MAIN)"
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+                        ))}
+                        <div>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    const key = prompt("Connection key (e.g. crm_main):")?.trim();
+                                    if (!key) return;
+                                    const existing = config.database_connections || {};
+                                    if (existing[key]) {
+                                        alert(`Connection '${key}' already exists.`);
+                                        return;
+                                    }
+                                    handleChange("database_connections", {
+                                        ...existing,
+                                        [key]: { type: "postgres" }
+                                    });
+                                }}
+                                className="px-3 py-2 rounded text-xs bg-blue-700 hover:bg-blue-600 text-white"
+                            >
+                                + Add Database Connection
+                            </button>
                         </div>
                     </div>
                 </section>
