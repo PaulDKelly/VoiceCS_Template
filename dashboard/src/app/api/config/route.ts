@@ -601,6 +601,36 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ success: true });
         }
 
+        if (action === 'copy_client') {
+            // Admin only (checked above)
+            if (!industry || !client || !newName) {
+                return NextResponse.json({ error: 'Industry, source client, and new name are required' }, { status: 400 });
+            }
+
+            const sourcePath = getClientConfigPath(industry, client);
+            if (!fs.existsSync(sourcePath)) {
+                return NextResponse.json({ error: 'Source client file not found' }, { status: 404 });
+            }
+
+            const targetPath = getClientConfigPath(industry, newName);
+            if (fs.existsSync(targetPath)) {
+                return NextResponse.json({ error: 'Client already exists' }, { status: 409 });
+            }
+
+            try {
+                const sourceContent = JSON.parse(fs.readFileSync(sourcePath, 'utf-8')) as Record<string, any>;
+                const copied = { ...sourceContent, client_id: newName };
+                const dir = path.dirname(targetPath);
+                if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+                fs.writeFileSync(targetPath, JSON.stringify(copied, null, 2));
+            } catch (e) {
+                return NextResponse.json({ error: 'Failed to copy client configuration' }, { status: 500 });
+            }
+
+            logAudit(user, 'copy_client', { industry, sourceClient: client, newClient: newName });
+            return NextResponse.json({ success: true });
+        }
+
         if (action === 'delete_client') {
             // Admin only (checked above)
             if (!industry || !client) return NextResponse.json({ error: 'Industry and Client required' }, { status: 400 });
