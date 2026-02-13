@@ -22,6 +22,16 @@ properties:
         value: NEXTAUTH_URL_PLACEHOLDER
       - name: TRUST_HOST
         value: "true"
+      - name: ELEVENLABS_API_KEY
+        secretRef: elevenlabs-key
+      - name: AZURE_SPEECH_KEY
+        secretRef: speech-key
+      - name: AZURE_SPEECH_KEY_HD
+        secretRef: speech-key-hd
+      - name: AZURE_SPEECH_REGION
+        value: AZURE_SPEECH_REGION_PLACEHOLDER
+      - name: AZURE_SPEECH_REGION_HD
+        value: AZURE_SPEECH_REGION_HD_PLACEHOLDER
       volumeMounts:
       - mountPath: /app/config
         volumeName: config-volume

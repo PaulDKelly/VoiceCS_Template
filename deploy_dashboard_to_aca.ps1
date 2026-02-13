@@ -37,6 +37,21 @@ if (-not $NEXTAUTH_URL) {
     $NEXTAUTH_URL = "https://$((az containerapp show --name $APP_NAME --resource-group $RESOURCE_GROUP --query properties.configuration.ingress.fqdn -o tsv))"
 }
 
+# Pull speech regions from voice agent app as defaults for TTS testing route in dashboard
+$VOICE_APP_NAME = "app-voice-agent"
+$AZURE_SPEECH_REGION = "uksouth"
+$AZURE_SPEECH_REGION_HD = "westeurope"
+try {
+    $VOICE_ENV = az containerapp show --name $VOICE_APP_NAME --resource-group $RESOURCE_GROUP --query properties.template.containers[0].env -o json | ConvertFrom-Json
+    $VOICE_REGION = ($VOICE_ENV | Where-Object { $_.name -eq "AZURE_SPEECH_REGION" }).value
+    $VOICE_REGION_HD = ($VOICE_ENV | Where-Object { $_.name -eq "AZURE_SPEECH_REGION_HD" }).value
+    if ($VOICE_REGION) { $AZURE_SPEECH_REGION = $VOICE_REGION }
+    if ($VOICE_REGION_HD) { $AZURE_SPEECH_REGION_HD = $VOICE_REGION_HD }
+}
+catch {
+    Write-Warning "Could not read speech regions from $VOICE_APP_NAME. Using defaults."
+}
+
 # --- Prepare YAML ---
 $templatePath = "deployment/dashboard.yaml.template"
 $outputPath = "deployment/dashboard.yaml"
@@ -46,6 +61,8 @@ $content = $content.Replace("ACR_NAME_PLACEHOLDER", $ACR_NAME)
 $content = $content.Replace("IMAGE_URI_PLACEHOLDER", $IMAGE_URI)
 $content = $content.Replace("NEXTAUTH_SECRET_PLACEHOLDER", $NEXTAUTH_SECRET)
 $content = $content.Replace("NEXTAUTH_URL_PLACEHOLDER", $NEXTAUTH_URL)
+$content = $content.Replace("AZURE_SPEECH_REGION_PLACEHOLDER", $AZURE_SPEECH_REGION)
+$content = $content.Replace("AZURE_SPEECH_REGION_HD_PLACEHOLDER", $AZURE_SPEECH_REGION_HD)
 $content | Out-File -FilePath $outputPath -Encoding utf8
 
 # --- Update app ---

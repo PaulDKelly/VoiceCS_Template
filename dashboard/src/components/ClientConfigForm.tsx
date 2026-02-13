@@ -87,6 +87,26 @@ export default function ClientConfigForm({ jsonContent, onChange, assignedPhoneN
         return "elevenlabs";
     }
 
+    function getVoiceDisplay(v: VoiceEntry): string {
+        if (v.provider === "elevenlabs") return v.voice_id || v.name || "";
+        return v.voice_name || v.name || "";
+    }
+
+    const saveVoiceLibrary = async (nextVoices: VoiceEntry[]) => {
+        const res = await fetch("/api/config", {
+            method: "POST",
+            body: JSON.stringify({ action: "save", type: "voice_library", content: { voices: nextVoices } })
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => null);
+            setVoiceLibraryError(err?.error || "Failed to save voice library.");
+            return false;
+        }
+        setVoiceLibrary(nextVoices);
+        setVoiceLibraryError(null);
+        return true;
+    };
+
     // Load industry defaults to get workflow templates
     useEffect(() => {
         const loadIndustryDefaults = async () => {
@@ -457,13 +477,13 @@ export default function ClientConfigForm({ jsonContent, onChange, assignedPhoneN
                                         )}
                                     {voiceLibrary.filter(v => v.provider === "elevenlabs").map(v => (
                                         <option key={v.voice_id || v.name} value={v.voice_id || ""}>
-                                            {v.name}{v.default ? " (Default)" : ""}
+                                            {getVoiceDisplay(v)}{v.default ? " (Default)" : ""}
                                         </option>
                                     ))}
                                 </select>
                                 <p className="text-[10px] text-gray-500 mt-1">
-                                    {voiceLibrary.find(v => v.provider === "elevenlabs" && v.default)?.name && (
-                                        <>Default for new clients: {voiceLibrary.find(v => v.provider === "elevenlabs" && v.default)?.name}</>
+                                    {voiceLibrary.find(v => v.provider === "elevenlabs" && v.default) && (
+                                        <>Default for new clients: {getVoiceDisplay(voiceLibrary.find(v => v.provider === "elevenlabs" && v.default) as VoiceEntry)}</>
                                     )}
                                 </p>
                             </div>
@@ -485,13 +505,13 @@ export default function ClientConfigForm({ jsonContent, onChange, assignedPhoneN
                                         )}
                                     {voiceLibrary.filter(v => v.provider === "azure_neural").map(v => (
                                         <option key={v.voice_name || v.name} value={v.voice_name || ""}>
-                                            {v.name}{v.default ? " (Default)" : ""}
+                                            {getVoiceDisplay(v)}{v.default ? " (Default)" : ""}
                                         </option>
                                     ))}
                                 </select>
                                 <p className="text-[10px] text-gray-500 mt-1">
-                                    {voiceLibrary.find(v => v.provider === "azure_neural" && v.default)?.name && (
-                                        <>Default for new clients: {voiceLibrary.find(v => v.provider === "azure_neural" && v.default)?.name}</>
+                                    {voiceLibrary.find(v => v.provider === "azure_neural" && v.default) && (
+                                        <>Default for new clients: {getVoiceDisplay(voiceLibrary.find(v => v.provider === "azure_neural" && v.default) as VoiceEntry)}</>
                                     )}
                                 </p>
                             </div>
@@ -533,6 +553,58 @@ export default function ClientConfigForm({ jsonContent, onChange, assignedPhoneN
 
                         {canManageVoiceLibrary && (
                             <div className="col-span-2 mt-2 border-t border-gray-700 pt-4">
+                                <h4 className="text-sm font-semibold text-purple-300 mb-3">Manage Voices (Admin)</h4>
+                                <div className="space-y-2 mb-4">
+                                    {voiceLibrary.map((v, idx) => (
+                                        <div key={`${v.provider}-${v.voice_id || v.voice_name || idx}`} className="grid grid-cols-12 gap-2 items-center">
+                                            <div className="col-span-4 text-xs text-gray-300 truncate">{getVoiceDisplay(v)}</div>
+                                            <div className="col-span-4">
+                                                <input
+                                                    type="text"
+                                                    value={v.name || ""}
+                                                    onChange={(e) => {
+                                                        const next = [...voiceLibrary];
+                                                        next[idx] = { ...next[idx], name: e.target.value };
+                                                        setVoiceLibrary(next);
+                                                    }}
+                                                    className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs"
+                                                    placeholder="Optional label"
+                                                />
+                                            </div>
+                                            <label className="col-span-2 text-xs text-gray-300 flex items-center gap-1">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={!!v.default}
+                                                    onChange={(e) => {
+                                                        const next = e.target.checked
+                                                            ? voiceLibrary.map((x, i) => ({ ...x, default: i === idx }))
+                                                            : voiceLibrary.map((x, i) => i === idx ? { ...x, default: false } : x);
+                                                        setVoiceLibrary(next);
+                                                    }}
+                                                    className="accent-purple-500"
+                                                />
+                                                Default
+                                            </label>
+                                            <button
+                                                type="button"
+                                                onClick={() => setVoiceLibrary(voiceLibrary.filter((_, i) => i !== idx))}
+                                                className="col-span-2 px-2 py-1 rounded text-xs bg-red-800 hover:bg-red-700 text-white"
+                                            >
+                                                Delete
+                                            </button>
+                                        </div>
+                                    ))}
+                                    <div>
+                                        <button
+                                            type="button"
+                                            onClick={async () => { await saveVoiceLibrary(voiceLibrary); }}
+                                            className="px-3 py-1 rounded text-xs bg-blue-700 hover:bg-blue-600 text-white"
+                                        >
+                                            Save Voice Changes
+                                        </button>
+                                    </div>
+                                </div>
+
                                 <h4 className="text-sm font-semibold text-purple-300 mb-3">Add Voice (Admin)</h4>
                                 <div className="grid grid-cols-2 gap-4">
                                     <div>
@@ -590,26 +662,22 @@ export default function ClientConfigForm({ jsonContent, onChange, assignedPhoneN
                                         <button
                                             type="button"
                                             onClick={async () => {
-                                                if (!newVoice.name || (newVoice.provider === "elevenlabs" && !newVoice.voice_id) || (newVoice.provider === "azure_neural" && !newVoice.voice_name)) {
+                                                if ((newVoice.provider === "elevenlabs" && !newVoice.voice_id) || (newVoice.provider === "azure_neural" && !newVoice.voice_name)) {
                                                     setVoiceLibraryError("Please fill in all required fields for the new voice.");
                                                     return;
                                                 }
-                                                const normalizedNewVoice: VoiceEntry = { ...newVoice, default: !!newVoice.default };
+                                                const fallbackName = newVoice.provider === "elevenlabs" ? (newVoice.voice_id || "") : (newVoice.voice_name || "");
+                                                const normalizedNewVoice: VoiceEntry = {
+                                                    ...newVoice,
+                                                    name: (newVoice.name || fallbackName).trim(),
+                                                    default: !!newVoice.default
+                                                };
                                                 const nextVoices = normalizedNewVoice.default
                                                     ? voiceLibrary.map(v => ({ ...v, default: false })).concat(normalizedNewVoice)
                                                     : voiceLibrary.concat(normalizedNewVoice);
-                                                const res = await fetch("/api/config", {
-                                                    method: "POST",
-                                                    body: JSON.stringify({ action: "save", type: "voice_library", content: { voices: nextVoices } })
-                                                });
-                                                if (!res.ok) {
-                                                    const err = await res.json().catch(() => null);
-                                                    setVoiceLibraryError(err?.error || "Failed to save voice library.");
-                                                    return;
-                                                }
-                                                setVoiceLibrary(nextVoices);
+                                                const ok = await saveVoiceLibrary(nextVoices);
+                                                if (!ok) return;
                                                 setNewVoice({ name: "", provider: "elevenlabs", voice_id: "", voice_name: "", default: false });
-                                                setVoiceLibraryError(null);
                                             }}
                                             className="px-3 py-1 rounded text-xs bg-purple-700 hover:bg-purple-600 text-white"
                                         >
