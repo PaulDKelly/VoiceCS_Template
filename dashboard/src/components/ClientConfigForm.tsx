@@ -72,6 +72,7 @@ export default function ClientConfigForm({ jsonContent, onChange, assignedPhoneN
     const [whisperTestError, setWhisperTestError] = useState<string | null>(null);
     const [voiceLibrary, setVoiceLibrary] = useState<VoiceEntry[]>([]);
     const [voiceLibraryError, setVoiceLibraryError] = useState<string | null>(null);
+    const [importingProvider, setImportingProvider] = useState<"" | "azure_gb" | "elevenlabs">("");
     const [newVoice, setNewVoice] = useState<VoiceEntry>({
         name: "",
         provider: "elevenlabs",
@@ -109,6 +110,29 @@ export default function ClientConfigForm({ jsonContent, onChange, assignedPhoneN
         setVoiceLibrary(nextVoices);
         setVoiceLibraryError(null);
         return true;
+    };
+
+    const importVoices = async (provider: "azure_gb" | "elevenlabs") => {
+        try {
+            setImportingProvider(provider);
+            setVoiceLibraryError(null);
+            const res = await fetch("/api/config", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ action: "import_voices", type: "voice_library", provider }),
+            });
+            const data = await res.json().catch(() => null);
+            if (!res.ok) {
+                setVoiceLibraryError(data?.error || "Failed to import voices.");
+                return;
+            }
+            const normalized = ((data?.voices || []) as VoiceEntry[]).map(v => ({ ...v, default: !!v.default }));
+            setVoiceLibrary(normalized);
+        } catch (err) {
+            setVoiceLibraryError("Failed to import voices.");
+        } finally {
+            setImportingProvider("");
+        }
     };
 
     // Load industry defaults to get workflow templates
@@ -616,6 +640,24 @@ export default function ClientConfigForm({ jsonContent, onChange, assignedPhoneN
                         {canManageVoiceLibrary && (
                             <div className="col-span-2 mt-2 border-t border-gray-700 pt-4">
                                 <h4 className="text-sm font-semibold text-purple-300 mb-3">Manage Voices (Admin)</h4>
+                                <div className="flex gap-2 mb-3">
+                                    <button
+                                        type="button"
+                                        onClick={async () => { await importVoices("azure_gb"); }}
+                                        disabled={importingProvider !== ""}
+                                        className="px-3 py-1 rounded text-xs bg-emerald-700 hover:bg-emerald-600 text-white disabled:opacity-50"
+                                    >
+                                        {importingProvider === "azure_gb" ? "Importing..." : "Import Azure GB Voices"}
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={async () => { await importVoices("elevenlabs"); }}
+                                        disabled={importingProvider !== ""}
+                                        className="px-3 py-1 rounded text-xs bg-emerald-700 hover:bg-emerald-600 text-white disabled:opacity-50"
+                                    >
+                                        {importingProvider === "elevenlabs" ? "Importing..." : "Import ElevenLabs Voices"}
+                                    </button>
+                                </div>
                                 <div className="space-y-2 mb-4">
                                     {voiceLibrary.map((v, idx) => (
                                         <div key={`${v.provider}-${v.voice_id || v.voice_name || idx}`} className="grid grid-cols-12 gap-2 items-center">

@@ -8,6 +8,168 @@ import { filterConfigListForUser, getUserPermissions, hasClientAccess, hasIndust
 
 export const dynamic = 'force-dynamic';
 
+type VoiceEntry = {
+    name: string;
+    provider: "elevenlabs" | "azure_neural";
+    voice_id?: string;
+    voice_name?: string;
+    default?: boolean;
+};
+
+function getVoiceLibraryPath() {
+    return path.join(getConfigPath(), 'voice_library.json');
+}
+
+function voiceKey(v: VoiceEntry) {
+    const id = v.provider === "elevenlabs" ? (v.voice_id || "") : (v.voice_name || "");
+    return `${v.provider}:${id}`;
+}
+
+function normalizeVoice(v: VoiceEntry): VoiceEntry | null {
+    if (!v || !v.provider) return null;
+    if (v.provider === "elevenlabs") {
+        const id = (v.voice_id || "").trim();
+        if (!id) return null;
+        return {
+            provider: "elevenlabs",
+            voice_id: id,
+            name: (v.name || id).trim(),
+            default: !!v.default,
+        };
+    }
+    const shortName = (v.voice_name || "").trim();
+    if (!shortName) return null;
+    return {
+        provider: "azure_neural",
+        voice_name: shortName,
+        name: (v.name || shortName).trim(),
+        default: !!v.default,
+    };
+}
+
+function loadVoiceLibrary(): { voices: VoiceEntry[] } {
+    const p = getVoiceLibraryPath();
+    if (!fs.existsSync(p)) return { voices: [] };
+    const parsed = JSON.parse(fs.readFileSync(p, 'utf-8'));
+    const voices = Array.isArray(parsed?.voices) ? parsed.voices : [];
+    const normalized = voices
+        .map((v: VoiceEntry) => normalizeVoice(v))
+        .filter((v: VoiceEntry | null): v is VoiceEntry => !!v);
+    return { voices: normalized };
+}
+
+function saveVoiceLibrary(lib: { voices: VoiceEntry[] }) {
+    const p = getVoiceLibraryPath();
+    const dir = path.dirname(p);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(p, JSON.stringify(lib, null, 2));
+    return p;
+}
+
+function upsertVoices(existing: VoiceEntry[], incoming: VoiceEntry[]) {
+    const map = new Map<string, VoiceEntry>();
+
+    for (const raw of existing) {
+        const v = normalizeVoice(raw);
+        if (!v) continue;
+        const k = voiceKey(v);
+        if (!map.has(k)) map.set(k, v);
+    }
+
+    for (const raw of incoming) {
+        const imported = normalizeVoice(raw);
+        if (!imported) continue;
+        const k = voiceKey(imported);
+        const prev = map.get(k);
+        if (!prev) {
+            map.set(k, imported);
+            continue;
+        }
+        // Preserve user-managed fields (name/default), but fill missing identifiers from import.
+        map.set(k, {
+            ...imported,
+            ...prev,
+            voice_id: prev.voice_id || imported.voice_id,
+            voice_name: prev.voice_name || imported.voice_name,
+        });
+    }
+
+    return Array.from(map.values());
+}
+
+async function importAzureGbVoices() {
+    const region = (process.env.AZURE_SPEECH_REGION || "uksouth").trim();
+    const key = process.env.AZURE_SPEECH_KEY;
+    if (!key) {
+        throw new Error("AZURE_SPEECH_KEY is not configured on the server.");
+    }
+
+    const url = `https://${region}.tts.speech.microsoft.com/cognitiveservices/voices/list`;
+    const res = await fetch(url, {
+        headers: { "Ocp-Apim-Subscription-Key": key },
+        cache: "no-store",
+    });
+    if (!res.ok) {
+        const txt = await res.text().catch(() => "");
+        throw new Error(`Azure voices import failed (${res.status}): ${txt || res.statusText}`);
+    }
+
+    const voices = await res.json().catch(() => []);
+    const imported = (Array.isArray(voices) ? voices : [])
+        .filter((v: any) => {
+            const locale = String(v?.Locale || "");
+            const shortName = String(v?.ShortName || "");
+            const voiceType = String(v?.VoiceType || "");
+            return (
+                locale === "en-GB" &&
+                (voiceType.toLowerCase() === "neural" || shortName.toLowerCase().includes("neural"))
+            );
+        })
+        .map((v: any) => {
+            const shortName = String(v?.ShortName || "").trim();
+            return {
+                provider: "azure_neural" as const,
+                voice_name: shortName,
+                name: shortName,
+                default: false,
+            };
+        });
+
+    return imported;
+}
+
+async function importElevenLabsVoices() {
+    const key = process.env.ELEVENLABS_API_KEY;
+    if (!key) {
+        throw new Error("ELEVENLABS_API_KEY is not configured on the server.");
+    }
+
+    const res = await fetch("https://api.elevenlabs.io/v1/voices", {
+        headers: { "xi-api-key": key },
+        cache: "no-store",
+    });
+    if (!res.ok) {
+        const txt = await res.text().catch(() => "");
+        throw new Error(`ElevenLabs voices import failed (${res.status}): ${txt || res.statusText}`);
+    }
+
+    const data = await res.json().catch(() => ({}));
+    const voices = Array.isArray(data?.voices) ? data.voices : [];
+    return voices
+        .map((v: any) => {
+            const id = String(v?.voice_id || "").trim();
+            if (!id) return null;
+            return {
+                provider: "elevenlabs" as const,
+                voice_id: id,
+                // Keep label neutral; Admin can rename in UI.
+                name: id,
+                default: false,
+            };
+        })
+        .filter((v: any) => !!v);
+}
+
 // Audit Log Helper
 function logAudit(user: any, action: string, details: any) {
     try {
@@ -176,7 +338,7 @@ export async function POST(req: NextRequest) {
         console.log(`[API] POST action=${action} type=${type} industry=${industry} client=${client} user=${userLabel}`);
 
         // SAFEGUARD: Basic Validation
-        if (action !== 'create_industry' && type !== 'phone_mappings' && type !== 'prompt_library' && !industry) {
+        if (action !== 'create_industry' && action !== 'import_voices' && type !== 'phone_mappings' && type !== 'prompt_library' && type !== 'voice_library' && !industry) {
             return NextResponse.json({ error: 'Industry is required' }, { status: 400 });
         }
 
@@ -264,6 +426,50 @@ export async function POST(req: NextRequest) {
             }
 
             return NextResponse.json({ success: true });
+        }
+
+        if (action === 'import_voices') {
+            if (type !== 'voice_library') {
+                return NextResponse.json({ error: 'Invalid type for import_voices' }, { status: 400 });
+            }
+            if (user.role !== 'admin') {
+                return NextResponse.json({ error: 'Forbidden: Admin Only' }, { status: 403 });
+            }
+            if (!(permissions.can_manage_voice_library || isSuperAdmin(user))) {
+                return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+            }
+
+            const provider = String(body?.provider || "").toLowerCase();
+            let imported: VoiceEntry[] = [];
+            if (provider === 'azure_gb' || provider === 'azure_neural_gb') {
+                imported = await importAzureGbVoices();
+            } else if (provider === 'elevenlabs') {
+                imported = await importElevenLabsVoices();
+            } else {
+                return NextResponse.json({ error: 'Invalid provider for import_voices' }, { status: 400 });
+            }
+
+            const existing = loadVoiceLibrary();
+            const merged = upsertVoices(existing.voices || [], imported || []);
+            const saved = { voices: merged };
+            const targetPath = saveVoiceLibrary(saved);
+
+            logAudit(user, 'import_voices', { provider, importedCount: imported.length, totalVoices: merged.length, targetPath });
+
+            try {
+                const relPath = path.relative(process.cwd(), targetPath);
+                if (fs.existsSync(path.join(process.cwd(), '.git'))) {
+                    const authorName = user.name || user.email || "unknown";
+                    const authorSlug = authorName.replace(' ', '.');
+                    const author = `${authorName} <${authorSlug}@voiceagent.local>`;
+                    execSync(`git add "${relPath}"`);
+                    execSync(`git commit -m "Dashboard import voices: ${provider}" --author="${author}"`);
+                }
+            } catch (e) {
+                console.warn("[Revision] Git commit failed:", String(e));
+            }
+
+            return NextResponse.json({ success: true, provider, importedCount: imported.length, totalVoices: merged.length, voices: merged });
         }
 
         // ... (Create/Delete logic remains similar but protected by admin check above) ...
