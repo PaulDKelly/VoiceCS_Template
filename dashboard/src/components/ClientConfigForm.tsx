@@ -14,6 +14,9 @@ type ClientConfig = {
     tts_provider?: string;
     azure_voice_name?: string;
     azure_speech_region?: string;
+    azure_ssml_lang?: string;
+    azure_voice_style?: string;
+    azure_voice_style_degree?: number;
     elevenlabs_voice_id?: string;
     language?: string;
     industry?: string;
@@ -63,6 +66,7 @@ export default function ClientConfigForm({ jsonContent, onChange, assignedPhoneN
     const [industryDefaults, setIndustryDefaults] = useState<any>(null);
     const [ttsTestStatus, setTtsTestStatus] = useState<"idle" | "loading" | "playing">("idle");
     const [ttsTestError, setTtsTestError] = useState<string | null>(null);
+    const [ttsTestText, setTtsTestText] = useState<string>("Hello, this is a short voice test for your assistant.");
     const audioRef = useRef<HTMLAudioElement | null>(null);
     const [whisperTestStatus, setWhisperTestStatus] = useState<"idle" | "loading" | "sent">("idle");
     const [whisperTestError, setWhisperTestError] = useState<string | null>(null);
@@ -223,7 +227,10 @@ export default function ClientConfigForm({ jsonContent, onChange, assignedPhoneN
                     voiceId: config.elevenlabs_voice_id || "",
                     azureVoiceName: config.azure_voice_name || "",
                     azureRegion: config.azure_speech_region || "",
-                    text: "Hello, this is a short voice test for your assistant.",
+                    azureLang: config.azure_ssml_lang || "",
+                    azureStyle: config.azure_voice_style || "",
+                    azureStyleDegree: config.azure_voice_style_degree,
+                    text: ttsTestText,
                 }),
             });
 
@@ -529,6 +536,61 @@ export default function ClientConfigForm({ jsonContent, onChange, assignedPhoneN
                                 <p className="text-[10px] text-gray-500 mt-1">
                                     Optional. Use if HD voices require a different region.
                                 </p>
+                            </div>
+                        )}
+                        {normalizeTtsProvider(config.tts_provider) === "azure_neural" && (
+                            <div>
+                                <label className="block text-sm font-medium text-gray-300 mb-2">Azure SSML Language</label>
+                                <input
+                                    type="text"
+                                    value={config.azure_ssml_lang || ""}
+                                    onChange={(e) => handleChange("azure_ssml_lang", e.target.value)}
+                                    className="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500"
+                                    placeholder="e.g., en-GB"
+                                />
+                                <p className="text-[10px] text-gray-500 mt-1">
+                                    Accent/language hint for multilingual voices. Example: en-GB.
+                                </p>
+                            </div>
+                        )}
+                        {normalizeTtsProvider(config.tts_provider) === "azure_neural" && (
+                            <div>
+                                <label className="block text-sm font-medium text-gray-300 mb-2">Azure Voice Style</label>
+                                <input
+                                    type="text"
+                                    value={config.azure_voice_style || ""}
+                                    onChange={(e) => handleChange("azure_voice_style", e.target.value)}
+                                    className="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500"
+                                    placeholder="e.g., customerservice, assistant, friendly"
+                                />
+                            </div>
+                        )}
+                        {normalizeTtsProvider(config.tts_provider) === "azure_neural" && (
+                            <div>
+                                <label className="block text-sm font-medium text-gray-300 mb-2">Azure Style Degree</label>
+                                <input
+                                    type="number"
+                                    step="0.1"
+                                    min="0.5"
+                                    max="2"
+                                    value={config.azure_voice_style_degree ?? ""}
+                                    onChange={(e) => handleChange("azure_voice_style_degree", e.target.value === "" ? undefined : Number(e.target.value))}
+                                    className="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500"
+                                    placeholder="1.0"
+                                />
+                                <p className="text-[10px] text-gray-500 mt-1">
+                                    Optional style strength (commonly 0.5 to 2.0).
+                                </p>
+                            </div>
+                        )}
+                        {canManageVoiceLibrary && (
+                            <div className="col-span-2">
+                                <label className="block text-sm font-medium text-gray-300 mb-2">Voice Test Text (Admin)</label>
+                                <textarea
+                                    value={ttsTestText}
+                                    onChange={(e) => setTtsTestText(e.target.value)}
+                                    className="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500 min-h-[80px]"
+                                />
                             </div>
                         )}
                         <div className="col-span-2 flex items-center gap-3">

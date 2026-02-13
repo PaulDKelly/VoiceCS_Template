@@ -5,6 +5,7 @@ import os
 import base64
 import audioop
 import websockets
+import time
 import azure.cognitiveservices.speech as speechsdk
 from shared_code.agent.agent_engine import run_agent_step
 
@@ -16,6 +17,19 @@ class TwilioBridge:
         self.speech_region = speech_region
         self.elevenlabs_api_key = elevenlabs_api_key
         self.voice_id = voice_id
+        self.tts_provider = "elevenlabs"
+        self.azure_voice_name = None
+        self.azure_speech_region = self.speech_region
+        self.azure_ssml_lang = "en-GB"
+        self.azure_voice_style = None
+        self.azure_voice_style_degree = None
+        self._tts_cache = {}
+        self._tts_cache_limit = 200
+        self._client_config = None
+        self._speaking = False
+        self._speaking_started_at = 0.0
+        self._barge_in_threshold_ms = 0
+        self._barge_in_triggered = False
         
         # --- Azure STT Setup ---
         self.speech_config = speechsdk.SpeechConfig(subscription=speech_key, region=speech_region)
@@ -76,6 +90,7 @@ class TwilioBridge:
                     # Capture Context Parameters
                     custom_params = data["start"].get("customParameters", {})
                     from_number = custom_params.get("phone_number") or custom_params.get("From")
+                    called_number = custom_params.get("called_number")
                     client_id = custom_params.get("client_id") or query_client_id
                     industry = custom_params.get("industry") or query_industry
                     
@@ -116,25 +131,89 @@ class TwilioBridge:
                     
                     if from_number:
                         session["phone_number"] = from_number
+                    if called_number:
+                        session["called_number"] = called_number
                     if client_id:
                         session["client_id"] = client_id
                     if industry:
                         session["industry"] = industry
-                        
-                    save_session(self.session_id, session)
-                    logger.info(f"Captured Session Context: Phone={from_number}, Client={client_id}, Industry={industry}")
 
-                    # Reload config to get the correct voice_id for this specific client
+                    # Load config for this client (used for caller memory + voice)
+                    config = None
                     if client_id and industry:
                         from shared_code.utils.config_loader import load_merged_config
                         try:
                             config = load_merged_config(client_id, industry)
+                            self._client_config = config
+                            tts_provider = config.get("tts_provider") or config.get("voice_provider")
+                            if tts_provider:
+                                self.tts_provider = tts_provider.strip().lower()
+                                logger.info(f"Using TTS provider for client {client_id}: {self.tts_provider}")
+
+                            azure_voice_name = config.get("azure_voice_name") or config.get("voice_name")
+                            if azure_voice_name:
+                                self.azure_voice_name = azure_voice_name
+                                logger.info(f"Using Azure voice for client {client_id}: {self.azure_voice_name}")
+
+                            azure_region = config.get("azure_speech_region")
+                            if azure_region:
+                                self.azure_speech_region = azure_region
+                                logger.info(f"Using Azure speech region for client {client_id}: {self.azure_speech_region}")
+
+                            azure_lang = config.get("azure_ssml_lang")
+                            if azure_lang:
+                                self.azure_ssml_lang = azure_lang
+
+                            azure_style = config.get("azure_voice_style")
+                            if azure_style:
+                                self.azure_voice_style = azure_style
+
+                            azure_style_degree = config.get("azure_voice_style_degree")
+                            if azure_style_degree is not None and azure_style_degree != "":
+                                self.azure_voice_style_degree = str(azure_style_degree)
+
                             client_voice_id = config.get("elevenlabs_voice_id")
                             if client_voice_id:
                                 logger.info(f"Overriding VoiceID for client {client_id}: {client_voice_id}")
                                 self.voice_id = client_voice_id
                         except Exception as e:
                             logger.error(f"Failed to load client config for voice override: {e}")
+
+                    # Barge-in threshold (ms). 0 = disabled
+                    try:
+                        threshold = (config or {}).get("barge_in_threshold_ms")
+                        if threshold is None:
+                            threshold = os.getenv("BARGE_IN_THRESHOLD_MS")
+                        self._barge_in_threshold_ms = int(threshold) if threshold is not None else 0
+                    except Exception:
+                        self._barge_in_threshold_ms = 0
+
+                    # Caller memory (persistent by phone number)
+                    enable_caller_memory = bool((config or {}).get("enable_caller_memory", False))
+                    if enable_caller_memory and from_number:
+                        try:
+                            from shared_code.utils.caller_memory import load_caller_memory, build_memory_note
+                            memory = load_caller_memory(from_number)
+                            if memory:
+                                session["caller_memory"] = build_memory_note(memory)
+                                if memory.get("name") and not session.get("customer_name"):
+                                    session["customer_name"] = memory.get("name")
+                        except Exception as e:
+                            logger.warning(f"Failed to load caller memory: {e}")
+                    elif not enable_caller_memory:
+                        session.pop("caller_memory", None)
+                        # Ensure we don't greet with a stale remembered name
+                        session.pop("customer_name", None)
+                        
+                    save_session(self.session_id, session)
+                    logger.info(f"Captured Session Context: Phone={from_number}, Client={client_id}, Industry={industry}")
+
+                    # Warm Azure TTS cache for common prompts to reduce latency
+                    if self.tts_provider in ("azure", "azure_neural", "azure_tts"):
+                        try:
+                            asyncio.create_task(self._warm_tts_cache())
+                        except Exception as e:
+                            logger.warning(f"Failed to warm TTS cache: {e}")
 
                     # Initial greeting 
                     # CRITICAL: Do NOT block the loop here.
@@ -147,6 +226,14 @@ class TwilioBridge:
                     # Convert MULAW -> PCM
                     pcm_chunk = audioop.ulaw2lin(chunk, 2)
                     self.push_stream.write(pcm_chunk)
+
+                    # Barge-in detection: user speaking while agent is talking
+                    if self._speaking and not self._barge_in_triggered and self._barge_in_threshold_ms > 0:
+                        elapsed_ms = (time.monotonic() - self._speaking_started_at) * 1000.0
+                        if elapsed_ms >= self._barge_in_threshold_ms:
+                            self._barge_in_triggered = True
+                            logger.info(f"Barge-in triggered after {elapsed_ms:.0f}ms; stopping TTS.")
+                            await self._send_clear_to_twilio()
                     
                 elif event_type == "stop":
                     logger.info("Stream stopped by event")
@@ -205,9 +292,20 @@ class TwilioBridge:
         
         if reply_text:
             logger.info(f"Agent reply: {reply_text}")
-            # 2. Convert to Speech (ElevenLabs optimized)
-            # Use optimized stream with Turbo model
-            await self._stream_elevenlabs_tts_optimized(reply_text)
+            # 2. Convert to Speech
+            self._barge_in_triggered = False
+            self._speaking = True
+            self._speaking_started_at = time.monotonic()
+            try:
+                if self.tts_provider in ("azure", "azure_neural", "azure_tts"):
+                    used = await self._stream_azure_tts(reply_text)
+                    if not used:
+                        await self._stream_elevenlabs_tts_optimized(reply_text)
+                else:
+                    # Use optimized stream with Turbo model
+                    await self._stream_elevenlabs_tts_optimized(reply_text)
+            finally:
+                self._speaking = False
             
         if should_hangup:
             logger.info("Closing socket due to HANGUP signal.")
@@ -237,6 +335,8 @@ class TwilioBridge:
                     audio_b64 = data.get("audio")
                     
                     if audio_b64:
+                        if self._barge_in_triggered:
+                            break
                         # Direct u-law chunks from ElevenLabs
                         await self._send_media_to_twilio(audio_b64)
                         
@@ -244,6 +344,162 @@ class TwilioBridge:
                         break
         except Exception as e:
             logger.error(f"ElevenLabs TTS Error: {e}")
+
+    async def _stream_azure_tts(self, text, send_audio: bool = True):
+        speech_region = self.azure_speech_region or self.speech_region
+        speech_key = self.speech_key
+        hd_region = os.getenv("AZURE_SPEECH_REGION_HD")
+        hd_key = os.getenv("AZURE_SPEECH_KEY_HD")
+        if hd_region and hd_key and speech_region and speech_region.lower() == hd_region.lower():
+            speech_key = hd_key
+
+        if not speech_key or not speech_region:
+            logger.error("Azure TTS requested but AZURE_SPEECH_KEY or AZURE_SPEECH_REGION is missing.")
+            return False
+
+        voice_name = self.azure_voice_name or os.getenv("AZURE_SPEECH_VOICE") or "en-GB-LibbyNeural"
+        lang = (self.azure_ssml_lang or "en-GB").strip() or "en-GB"
+        style = (self.azure_voice_style or "").strip()
+        style_degree = (self.azure_voice_style_degree or "").strip() if self.azure_voice_style_degree is not None else ""
+
+        try:
+            cache_key = (speech_region, voice_name, lang, style, style_degree, text)
+            cached = self._tts_cache.get(cache_key)
+            if cached:
+                if send_audio:
+                    for chunk in cached:
+                        await self._send_media_to_twilio(chunk)
+                return True
+
+            speech_config = speechsdk.SpeechConfig(subscription=speech_key, region=speech_region)
+            speech_config.speech_synthesis_voice_name = voice_name
+
+            output_format = getattr(speechsdk.SpeechSynthesisOutputFormat, "Raw8Khz8BitMonoMULaw", None)
+            if output_format is None:
+                output_format = getattr(speechsdk.SpeechSynthesisOutputFormat, "Riff8Khz8BitMonoMULaw", None)
+            if output_format is None:
+                logger.error("Azure TTS output format for 8kHz mu-law not available in SDK.")
+                return False
+
+            speech_config.set_speech_synthesis_output_format(output_format)
+            synthesizer = speechsdk.SpeechSynthesizer(speech_config=speech_config, audio_config=None)
+
+            loop = asyncio.get_event_loop()
+            ssml = self._build_azure_ssml(text=text, voice_name=voice_name, lang=lang, style=style, style_degree=style_degree)
+            result = await loop.run_in_executor(None, lambda: synthesizer.speak_ssml_async(ssml).get())
+
+            # Some voices don't support certain styles; retry once without style.
+            if result.reason == speechsdk.ResultReason.Canceled and style:
+                retry_ssml = self._build_azure_ssml(text=text, voice_name=voice_name, lang=lang, style="", style_degree="")
+                result = await loop.run_in_executor(None, lambda: synthesizer.speak_ssml_async(retry_ssml).get())
+
+            if result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
+                audio = result.audio_data
+                if audio[:4] == b"RIFF" and len(audio) > 44:
+                    # Strip RIFF header if present
+                    audio = audio[44:]
+
+                chunk_size = 160  # 20ms @ 8kHz mu-law
+                cached_chunks = []
+                for i in range(0, len(audio), chunk_size):
+                    chunk = audio[i:i + chunk_size]
+                    if not chunk:
+                        continue
+                    if self._barge_in_triggered:
+                        break
+                    b64_audio = base64.b64encode(chunk).decode("utf-8")
+                    cached_chunks.append(b64_audio)
+                    if send_audio:
+                        await self._send_media_to_twilio(b64_audio)
+                # Cache for future use (common prompts)
+                self._tts_cache[cache_key] = cached_chunks
+                if len(self._tts_cache) > self._tts_cache_limit:
+                    self._tts_cache.pop(next(iter(self._tts_cache)))
+                return True
+
+            if result.reason == speechsdk.ResultReason.Canceled:
+                cancellation_details = result.cancellation_details
+                logger.error(f"Azure TTS canceled: {cancellation_details.reason} | {cancellation_details.error_details}")
+                return False
+
+            logger.error(f"Azure TTS failed. Reason: {result.reason}")
+            return False
+        except Exception as e:
+            logger.error(f"Azure TTS Error: {e}")
+            return False
+
+    @staticmethod
+    def _xml_escape(value: str) -> str:
+        return (
+            str(value)
+            .replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+            .replace('"', "&quot;")
+            .replace("'", "&apos;")
+        )
+
+    def _build_azure_ssml(self, text: str, voice_name: str, lang: str, style: str = "", style_degree: str = "") -> str:
+        escaped_text = self._xml_escape(text)
+        escaped_voice = self._xml_escape(voice_name)
+        escaped_lang = self._xml_escape(lang or "en-GB")
+        escaped_style = self._xml_escape(style)
+        escaped_style_degree = self._xml_escape(style_degree)
+
+        if escaped_style:
+            style_part = f'<mstts:express-as style="{escaped_style}"'
+            if escaped_style_degree:
+                style_part += f' styledegree="{escaped_style_degree}"'
+            style_part += f'><lang xml:lang="{escaped_lang}">{escaped_text}</lang></mstts:express-as>'
+        else:
+            style_part = f'<lang xml:lang="{escaped_lang}">{escaped_text}</lang>'
+
+        return (
+            f'<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" '
+            f'xmlns:mstts="http://www.w3.org/2001/mstts" xml:lang="{escaped_lang}">'
+            f'<voice name="{escaped_voice}">{style_part}</voice></speak>'
+        )
+
+    def _resolve_prompt_vars(self, prompt: str) -> str:
+        if not prompt:
+            return ""
+        assistant = ""
+        brand = ""
+        if isinstance(self._client_config, dict):
+            assistant = (
+                self._client_config.get("assistant_name")
+                or self._client_config.get("agent_name")
+                or "agent"
+            )
+            brand = (
+                self._client_config.get("brand_name")
+                or self._client_config.get("default_brand_name")
+                or "brand"
+            )
+        text = prompt.replace("{assistant}", str(assistant)).replace("{brand}", str(brand))
+        text = text.replace("{name}", "")
+        # Clean up punctuation/spacing if name is missing
+        import re
+        text = re.sub(r",\s*([?.!])", r"\1", text)
+        text = re.sub(r"\s{2,}", " ", text).strip()
+        return text
+
+    async def _warm_tts_cache(self):
+        if not self._client_config:
+            return
+        prompts = self._client_config.get("prompts", {})
+        if not isinstance(prompts, dict):
+            return
+        keys = ["system_greeting", "ask_intent_with_name", "ask_intent_retry_giveup"]
+        texts = []
+        for k in keys:
+            if k in prompts:
+                resolved = self._resolve_prompt_vars(prompts.get(k))
+                if resolved:
+                    texts.append(resolved)
+        # Avoid warming too many prompts
+        for text in texts[:3]:
+            await self._stream_azure_tts(text, send_audio=False)
 
     async def _send_media_to_twilio(self, b64_audio):
         if self.websocket and self.stream_sid:
@@ -261,6 +517,17 @@ class TwilioBridge:
                 # Catch "Unexpected ASGI message" or "Connection closed"
                 logger.warning(f"Failed to send media to Twilio (Connection likely closed): {e}")
                 pass
+
+    async def _send_clear_to_twilio(self):
+        if self.websocket and self.stream_sid:
+            msg = {
+                "event": "clear",
+                "streamSid": self.stream_sid
+            }
+            try:
+                await self.websocket.send_text(json.dumps(msg))
+            except Exception as e:
+                logger.warning(f"Failed to send clear to Twilio: {e}")
 
     # Add loop setter for thread safety bridge
     def set_loop(self, loop):
