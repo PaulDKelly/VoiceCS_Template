@@ -32,6 +32,10 @@ properties:
         value: AZURE_SPEECH_REGION_PLACEHOLDER
       - name: AZURE_SPEECH_REGION_HD
         value: AZURE_SPEECH_REGION_HD_PLACEHOLDER
+      - name: TWILIO_ACCOUNT_SID
+        secretRef: twilio-account-sid
+      - name: TWILIO_AUTH_TOKEN
+        secretRef: twilio-auth-token
       volumeMounts:
       - mountPath: /app/config
         volumeName: config-volume
