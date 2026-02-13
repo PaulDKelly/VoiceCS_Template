@@ -93,7 +93,12 @@ export default function ClientConfigForm({ jsonContent, onChange, assignedPhoneN
     }
 
     function getVoiceDisplay(v: VoiceEntry): string {
-        if (v.provider === "elevenlabs") return v.voice_id || v.name || "";
+        if (v.provider === "elevenlabs") {
+            const id = v.voice_id || "";
+            const label = (v.name || "").trim();
+            if (label && id && label !== id) return `${label} (${id})`;
+            return id || label;
+        }
         return v.voice_name || v.name || "";
     }
 

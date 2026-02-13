@@ -86,11 +86,19 @@ function upsertVoices(existing: VoiceEntry[], incoming: VoiceEntry[]) {
             continue;
         }
         // Preserve user-managed fields (name/default), but fill missing identifiers from import.
+        const prevName = (prev.name || "").trim();
+        const importedName = (imported.name || "").trim();
+        const prevIsPlaceholderId =
+            imported.provider === "elevenlabs" &&
+            !!prev.voice_id &&
+            (prevName === prev.voice_id || !prevName);
+
         map.set(k, {
             ...imported,
             ...prev,
             voice_id: prev.voice_id || imported.voice_id,
             voice_name: prev.voice_name || imported.voice_name,
+            name: prevIsPlaceholderId ? (importedName || prevName) : (prevName || importedName),
         });
     }
 
@@ -195,11 +203,11 @@ async function importElevenLabsVoices() {
         .map((v: any) => {
             const id = String(v?.voice_id || "").trim();
             if (!id) return null;
+            const providerName = String(v?.name || "").trim();
             return {
                 provider: "elevenlabs" as const,
                 voice_id: id,
-                // Keep label neutral; Admin can rename in UI.
-                name: id,
+                name: providerName || id,
                 default: false,
             };
         })
