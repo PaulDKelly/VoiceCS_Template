@@ -1,13 +1,14 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { Folder, FileJson, Save, Plus, Phone, Trash2, History, LogOut, Settings } from "lucide-react";
+import { useEffect, useRef, useState, type DragEvent } from "react";
+import { Save, Plus, History, LogOut, Settings, ChevronDown, ChevronRight } from "lucide-react";
 import PromptEditor from "@/components/PromptEditor";
 import WorkflowVisualizer from "@/components/WorkflowVisualizer";
 import ClientConfigForm from "@/components/ClientConfigForm";
 import PhoneMappings from "@/components/PhoneMappings";
 import VersionHistory from "@/components/VersionHistory";
 import UserManagement from "@/components/UserManagement";
+import WorkflowCopilot from "@/components/WorkflowCopilot";
 
 import { signIn, signOut, useSession } from "next-auth/react";
 
@@ -15,6 +16,12 @@ type ConfigList = {
   industries: string[];
   clients: Record<string, string[]>;
 };
+
+type NodePickerAction = {
+  type: "prompt" | "action" | "condition" | "knowledge" | "handoff";
+  nonce: number;
+};
+type LeftEditorTab = "none" | "prompts" | "config" | "json" | "phone_routing";
 
 export default function Home() {
   const { data: session, status } = useSession();
@@ -25,8 +32,23 @@ export default function Home() {
   const [selectedType, setSelectedType] = useState<"industry" | "client" | null>(null);
   const [selectedIndustry, setSelectedIndustry] = useState<string | null>(null);
   const [selectedClient, setSelectedClient] = useState<string | null>(null);
+  const [pickerIndustry, setPickerIndustry] = useState<string>("");
+  const [pickerClientKey, setPickerClientKey] = useState<string>("");
+  const [pickerClientSearch, setPickerClientSearch] = useState("");
   const [showHistory, setShowHistory] = useState(false);
-  const [activeTab, setActiveTab] = useState<"prompts" | "workflows" | "config" | "phone_mappings" | "json" | "users">("prompts");
+  const [activeTab, setActiveTab] = useState<"prompts" | "workflows" | "config" | "phone_mappings" | "json" | "users">("workflows");
+  const [leftEditorTab, setLeftEditorTab] = useState<LeftEditorTab>("none");
+  const [nodePickerAction, setNodePickerAction] = useState<NodePickerAction | null>(null);
+  const [selectedWorkflowKey, setSelectedWorkflowKey] = useState<string | null>(null);
+  const [workflowFilter, setWorkflowFilter] = useState("");
+  const [addWorkflowRequestNonce, setAddWorkflowRequestNonce] = useState(0);
+  const [isSidebarCompact, setIsSidebarCompact] = useState(true);
+  const [phoneMappingsContent, setPhoneMappingsContent] = useState<string>(JSON.stringify({ mappings: {} }, null, 2));
+  const [collapsedSections, setCollapsedSections] = useState({
+    context: false,
+    workflows: false,
+    picker: false,
+  });
 
   const [editorContent, setEditorContent] = useState<string>("");
   const [message, setMessage] = useState<string>("");
@@ -40,6 +62,14 @@ export default function Home() {
   const loadRequestIdRef = useRef(0);
   const loadAbortRef = useRef<AbortController | null>(null);
   const [isLoadingConfig, setIsLoadingConfig] = useState(false);
+  const [initialConfigLoaded, setInitialConfigLoaded] = useState(false);
+  const [loginEmail, setLoginEmail] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
+  const [loginError, setLoginError] = useState("");
+  const [resetOpen, setResetOpen] = useState(false);
+  const [resetEmail, setResetEmail] = useState("");
+  const [resetMessage, setResetMessage] = useState("");
+  const [availableAuthProviders, setAvailableAuthProviders] = useState<string[]>([]);
 
   useEffect(() => {
     if (status === "authenticated") {
@@ -48,9 +78,30 @@ export default function Home() {
     }
   }, [status]);
 
+  useEffect(() => {
+    if (status !== "unauthenticated") return;
+    (async () => {
+      try {
+        const res = await fetch("/api/auth/providers", { cache: "no-store" });
+        const json = await res.json();
+        setAvailableAuthProviders(Object.keys(json || {}));
+      } catch {
+        setAvailableAuthProviders([]);
+      }
+    })();
+  }, [status]);
+
   async function fetchMe() {
     try {
-      const res = await fetch("/api/me", { cache: "no-store" });
+      const attempt = async () => fetch("/api/me", { cache: "no-store" });
+      let res = await attempt();
+
+      // In dev, session cookies can race right after sign-in.
+      if (res.status === 401) {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        res = await attempt();
+      }
+
       if (res.status === 401) {
         await signOut();
         return;
@@ -66,22 +117,6 @@ export default function Home() {
     }
   }
 
-  if (status === "loading") {
-    return <div className="flex items-center justify-center h-screen bg-gray-900 text-white">Loading session...</div>;
-  }
-  if (!session) {
-    return (
-      <div className="flex items-center justify-center h-screen bg-gray-900 text-white">
-        <button
-          onClick={() => signIn()}
-          className="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded"
-        >
-          Sign in
-        </button>
-      </div>
-    );
-  }
-
   async function fetchList() {
     try {
       const [resList, resMappings] = await Promise.all([
@@ -93,6 +128,7 @@ export default function Home() {
 
       setList(dataList);
       setPhoneMappings(dataMappings.mappings || {});
+      setPhoneMappingsContent(JSON.stringify(dataMappings, null, 2));
     } catch (e) {
       console.error("Failed to load initial data", e);
     }
@@ -100,12 +136,13 @@ export default function Home() {
 
   async function loadConfig(type: "industry" | "client", industry: string, client?: string) {
     if (activeTab === 'phone_mappings' || activeTab === 'users') {
-      setActiveTab(type === "client" ? "config" : "prompts");
+      setActiveTab("workflows");
     }
 
     setSelectedType(type);
     setSelectedIndustry(industry);
     setSelectedClient(client || null);
+    setSelectedWorkflowKey(null);
     setIsLoadingConfig(true);
     setLoadError(null);
 
@@ -151,6 +188,12 @@ export default function Home() {
     setEditorContent(JSON.stringify(json, null, 2));
     setMessage("");
     setIsLoadingConfig(false);
+    try {
+      const key = client ? `${industry}::${client}` : `${industry}::`;
+      localStorage.setItem("dashboard:lastConfig", key);
+    } catch {
+      // Ignore localStorage failures.
+    }
   }
 
   async function saveConfig() {
@@ -163,9 +206,11 @@ export default function Home() {
       return;
     }
     // Handle Phone Mappings Save
-    if (activeTab === 'phone_mappings') {
+    if (activeTab === 'phone_mappings' || leftEditorTab === "phone_routing") {
+      const ok = confirm("Save changes to global Phone Routing?");
+      if (!ok) return;
       try {
-        const content = JSON.parse(editorContent);
+        const content = JSON.parse(phoneMappingsContent || editorContent);
         const res = await fetch("/api/config", {
           method: "POST",
           body: JSON.stringify({
@@ -194,6 +239,12 @@ export default function Home() {
     }
 
     if (!selectedIndustry || !selectedType) return;
+
+    const targetLabel = selectedType === "client"
+      ? `client '${selectedClient}' in industry '${selectedIndustry}'`
+      : `industry defaults for '${selectedIndustry}'`;
+    const confirmText = `Save changes to ${targetLabel}?`;
+    if (!confirm(confirmText)) return;
 
     try {
       const content = JSON.parse(editorContent);
@@ -380,43 +431,231 @@ export default function Home() {
     }
   };
 
-
-  if (!list || !user) return <div className="p-10 bg-gray-900 text-white min-h-screen">Loading configuration...</div>;
   const permissions = user?.permissions || {};
-  const isSuperAdmin = user.role === "admin" && (
-    (user.allowed_industries || []).includes("*") || (user.allowed_clients || []).includes("*")
+  const isGlobalAdmin = user?.role === "global_admin" || (
+    user?.role === "admin" && (
+      (user.allowed_industries || []).includes("*") || (user.allowed_clients || []).includes("*")
+    )
   );
-  const canViewPhoneMappings = isSuperAdmin || permissions.can_view_phone_mappings;
-  const canEditPhoneMappings = isSuperAdmin || permissions.can_edit_phone_mappings;
-  const canEditClients = isSuperAdmin || permissions.can_edit_clients;
-  const canEditIndustries = isSuperAdmin;
-  const canManageUsers = isSuperAdmin || permissions.can_manage_users;
-  const canManagePromptLibrary = isSuperAdmin || permissions.can_manage_prompt_library;
-  const canManageIntentLibrary = isSuperAdmin || permissions.can_manage_prompt_library;
+  const isAdmin = user?.role === "admin" || isGlobalAdmin;
+  const canViewPhoneMappings = isGlobalAdmin || permissions.can_view_phone_mappings;
+  const canEditPhoneMappings = isGlobalAdmin || permissions.can_edit_phone_mappings;
+  const canEditClients = isGlobalAdmin || permissions.can_edit_clients;
+  const canEditIndustries = isGlobalAdmin;
+  const canManageUsers = isGlobalAdmin || permissions.can_manage_users;
+  const canManagePromptLibrary = isGlobalAdmin || permissions.can_manage_prompt_library;
+  const canManageIntentLibrary = isGlobalAdmin || permissions.can_manage_prompt_library;
   // Voice library modifications are Admin-only (per product requirement), regardless of per-user flags.
-  const canManageVoiceLibrary = user.role === "admin" && (isSuperAdmin || permissions.can_manage_voice_library);
-  const canViewHistory = isSuperAdmin || permissions.can_view_history;
-  const canRevertHistory = isSuperAdmin || permissions.can_revert_history;
+  const canManageVoiceLibrary = isAdmin && (isGlobalAdmin || permissions.can_manage_voice_library);
+  const canViewHistory = isGlobalAdmin || permissions.can_view_history;
+  const canRevertHistory = isGlobalAdmin || permissions.can_revert_history;
   const canSave = (() => {
-    if (activeTab === "phone_mappings") return canEditPhoneMappings;
+    if (activeTab === "phone_mappings" || leftEditorTab === "phone_routing") return canEditPhoneMappings;
     if (selectedType === "client") return canEditClients;
     if (selectedType === "industry") return canEditIndustries;
     return false;
   })();
 
+  const workflowKeys = (() => {
+    if (!isValidJson(editorContent)) return [] as string[];
+    const parsed = JSON.parse(editorContent);
+    const intents = Array.isArray(parsed?.intents) ? parsed.intents.filter((k: string) => k !== "general") : [];
+    const workflows = parsed?.workflows ? Object.keys(parsed.workflows).filter((k) => k !== "general") : [];
+    return Array.from(new Set([...intents, ...workflows]));
+  })();
+  const filteredWorkflowKeys = workflowKeys.filter((k) => k.toLowerCase().includes(workflowFilter.trim().toLowerCase()));
+
+  useEffect(() => {
+    if (activeTab !== "workflows") return;
+    if (!workflowKeys.length) {
+      if (selectedWorkflowKey !== null) setSelectedWorkflowKey(null);
+      return;
+    }
+    if (selectedWorkflowKey && workflowKeys.includes(selectedWorkflowKey)) return;
+
+    const parsed = isValidJson(editorContent) ? JSON.parse(editorContent) : {};
+    const preferred = parsed?.default_intent && workflowKeys.includes(parsed.default_intent)
+      ? parsed.default_intent
+      : (workflowKeys.includes("first_response") ? "first_response" : workflowKeys[0]);
+    setSelectedWorkflowKey(preferred);
+  }, [activeTab, editorContent, selectedWorkflowKey, workflowKeys]);
+
+  useEffect(() => {
+    setPickerIndustry(selectedIndustry || "");
+    setPickerClientKey(selectedIndustry && selectedClient ? `${selectedIndustry}::${selectedClient}` : "");
+    setPickerClientSearch("");
+  }, [selectedIndustry, selectedClient]);
+
+  useEffect(() => {
+    if (!list || !session || initialConfigLoaded) return;
+    if (selectedIndustry || isLoadingConfig) return;
+
+    let loaded = false;
+    try {
+      const saved = localStorage.getItem("dashboard:lastConfig");
+      if (saved) {
+        const [industry, client] = saved.split("::");
+        if (industry && list.industries.includes(industry)) {
+          if (client && (list.clients[industry] || []).includes(client)) {
+            loadConfig("client", industry, client);
+            loaded = true;
+          } else {
+            loadConfig("industry", industry);
+            loaded = true;
+          }
+        }
+      }
+    } catch {
+      // Ignore localStorage failures.
+    }
+
+    if (!loaded) {
+      const firstIndustry = list.industries[0];
+      if (!firstIndustry) {
+        setInitialConfigLoaded(true);
+        return;
+      }
+      const firstClient = (list.clients[firstIndustry] || [])[0];
+      if (firstClient) {
+        loadConfig("client", firstIndustry, firstClient);
+      } else {
+        loadConfig("industry", firstIndustry);
+      }
+    }
+    setInitialConfigLoaded(true);
+  }, [list, session, initialConfigLoaded, selectedIndustry, isLoadingConfig]);
+
+  const toggleSection = (section: "context" | "workflows" | "picker") => {
+    setCollapsedSections((prev) => ({ ...prev, [section]: !prev[section] }));
+  };
+  const beginNodeDrag = (
+    event: DragEvent<HTMLButtonElement>,
+    type: "prompt" | "action" | "condition" | "knowledge" | "handoff"
+  ) => {
+    event.dataTransfer.setData("application/x-node-type", type);
+    event.dataTransfer.effectAllowed = "move";
+  };
+  const leftTabLabel = leftEditorTab === "prompts"
+    ? "Prompt Library"
+    : leftEditorTab === "config"
+      ? "Client Config"
+      : leftEditorTab === "phone_routing"
+        ? "Phone Routing"
+        : leftEditorTab === "json"
+          ? "Raw JSON"
+          : "Workflow Only";
+
+  if (status === "loading") {
+    return <div className="flex items-center justify-center h-screen bg-gray-900 text-white">Loading session...</div>;
+  }
+
+  if (!session) {
+    return (
+      <div className="flex items-center justify-center h-screen bg-gray-900 text-white p-4">
+        <div className="w-full max-w-md bg-gray-800 border border-gray-700 rounded-lg p-6">
+          <h2 className="text-xl font-semibold mb-4">Sign in</h2>
+          <div className="space-y-3">
+            <input
+              type="email"
+              value={loginEmail}
+              onChange={(e) => setLoginEmail(e.target.value)}
+              placeholder="Email"
+              className="w-full bg-gray-900 border border-gray-600 rounded p-2 text-white"
+            />
+            <input
+              type="password"
+              value={loginPassword}
+              onChange={(e) => setLoginPassword(e.target.value)}
+              placeholder="Password"
+              className="w-full bg-gray-900 border border-gray-600 rounded p-2 text-white"
+            />
+            {loginError && <div className="text-sm text-red-400">{loginError}</div>}
+            <button
+              onClick={async () => {
+                setLoginError("");
+                const res = await signIn("credentials", {
+                  email: loginEmail.trim().toLowerCase(),
+                  password: loginPassword,
+                  redirect: false,
+                });
+                if (!res || res.error) {
+                  setLoginError("Invalid email or password.");
+                }
+              }}
+              className="w-full px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded"
+            >
+              Sign in
+            </button>
+            <div className="flex items-center justify-between text-xs">
+              <button
+                onClick={() => setResetOpen(true)}
+                className="text-blue-300 hover:text-blue-200"
+              >
+                Forgot password?
+              </button>
+              <div className="text-gray-500">Use corporate SSO if enabled.</div>
+            </div>
+            {(availableAuthProviders.includes("google") || availableAuthProviders.includes("azure-ad")) && (
+              <div className="grid grid-cols-2 gap-2 pt-2">
+                {availableAuthProviders.includes("google") && (
+                  <button onClick={() => signIn("google")} className="px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded text-sm">Google</button>
+                )}
+                {availableAuthProviders.includes("azure-ad") && (
+                  <button onClick={() => signIn("azure-ad")} className="px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded text-sm">Microsoft</button>
+                )}
+              </div>
+            )}
+          </div>
+          {resetOpen && (
+            <div className="mt-4 border-t border-gray-700 pt-4 space-y-2">
+              <div className="text-sm text-gray-300">Request password reset</div>
+              <input
+                type="email"
+                value={resetEmail}
+                onChange={(e) => setResetEmail(e.target.value)}
+                placeholder="Your account email"
+                className="w-full bg-gray-900 border border-gray-600 rounded p-2 text-white"
+              />
+              <button
+                onClick={async () => {
+                  setResetMessage("");
+                  const res = await fetch("/api/auth/password-reset/request", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ email: resetEmail }),
+                  });
+                  const json = await res.json().catch(() => ({} as any));
+                  setResetMessage(json?.message || (res.ok ? "If this email exists, a reset email has been sent." : "Reset request failed."));
+                }}
+                className="w-full px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded text-sm"
+              >
+                Send reset link
+              </button>
+              {resetMessage && <div className="text-xs text-gray-300">{resetMessage}</div>}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  if (!list || !user) return <div className="p-10 bg-gray-900 text-white min-h-screen">Loading configuration...</div>;
+
   return (
     <div className="flex h-screen bg-gray-900 text-gray-100 font-sans relative">
       {/* Sidebar */}
-      <div className="w-1/4 bg-gray-800 border-r border-gray-700 overflow-y-auto flex flex-col">
+      <div className={`${isSidebarCompact ? "w-[15%] min-w-[190px]" : "w-[18.75%] min-w-[220px]"} bg-gray-800 border-r border-gray-700 overflow-y-auto flex flex-col transition-all duration-200`}>
         {/* User Header */}
         <div className="p-4 border-b border-gray-700 bg-gray-800/50">
           <div className="flex items-center justify-between mb-2">
             <div className="flex flex-col">
               <span className="font-bold text-white">{user.name}</span>
-              <span className="text-xs text-gray-400 capitalize">{user.role}</span>
+              <span className="text-xs text-gray-400">
+                {user.role === "global_admin" ? "Global Admin" : user.role === "admin" ? "Admin" : "User"}
+              </span>
             </div>
             <div className="flex items-center gap-2 relative">
-              {canManageUsers && (
+              {(canManageUsers || canViewPhoneMappings) && (
                 <div className="relative">
                   <button
                     onClick={() => setSettingsOpen(!settingsOpen)}
@@ -427,17 +666,31 @@ export default function Home() {
                   </button>
                   {settingsOpen && (
                     <div className="absolute right-0 mt-2 w-48 bg-gray-800 border border-gray-700 rounded shadow-lg z-50 overflow-hidden">
-                      <button
-                        onClick={() => {
-                          setActiveTab("users");
-                          setSelectedType(null);
-                          setSelectedIndustry(null);
-                          setSettingsOpen(false);
-                        }}
-                        className="w-full text-left px-4 py-2 text-sm text-gray-300 hover:bg-gray-700 hover:text-white"
-                      >
-                        User Management
-                      </button>
+                      {canViewPhoneMappings && (
+                        <button
+                          onClick={() => {
+                            setActiveTab("workflows");
+                            setLeftEditorTab("phone_routing");
+                            setSettingsOpen(false);
+                          }}
+                          className="w-full text-left px-4 py-2 text-sm text-gray-300 hover:bg-gray-700 hover:text-white"
+                        >
+                          Phone Routing
+                        </button>
+                      )}
+                      {canManageUsers && (
+                        <button
+                          onClick={() => {
+                            setActiveTab("users");
+                            setSelectedType(null);
+                            setSelectedIndustry(null);
+                            setSettingsOpen(false);
+                          }}
+                          className="w-full text-left px-4 py-2 text-sm text-gray-300 hover:bg-gray-700 hover:text-white"
+                        >
+                          User Management
+                        </button>
+                      )}
                     </div>
                   )}
                 </div>
@@ -451,142 +704,193 @@ export default function Home() {
 
         <div className="p-4 bg-gray-900 sticky top-0 border-b border-gray-700 flex justify-between items-center">
           <h1 className="text-xl font-bold text-blue-400">Configurations</h1>
-          {user.role === 'admin' && (
-            <button onClick={openCreateIndustry} className="text-green-400 hover:text-green-300" title="Add Industry">
-              <Plus size={20} />
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setIsSidebarCompact((v) => !v)}
+              className="text-gray-400 hover:text-white"
+              title={isSidebarCompact ? "Expand sidebar" : "Compact sidebar"}
+            >
+              {isSidebarCompact ? <ChevronRight size={16} /> : <ChevronDown size={16} />}
             </button>
-          )}
+            {isGlobalAdmin && (
+              <button onClick={openCreateIndustry} className="text-green-400 hover:text-green-300" title="Add Industry">
+                <Plus size={20} />
+              </button>
+            )}
+          </div>
         </div>
 
-        {canViewPhoneMappings && (
+        {list && (
           <div className="p-4 border-b border-gray-700">
-            <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Global Settings</h3>
-            <button
-              onClick={() => {
-                setSelectedType(null);
-                setSelectedIndustry(null);
-                setActiveTab("phone_mappings");
-              }}
-              className={`flex items-center gap-2 w-full px-3 py-2 text-sm rounded transition ${activeTab === "phone_mappings" ? "bg-blue-600/20 text-blue-400" : "text-gray-400 hover:text-white hover:bg-gray-700"}`}
-            >
-              <Phone size={14} />
-              Phone Routing
-            </button>
+            <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Client Picker</h3>
+            <div className="space-y-2">
+              <select
+                className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-sm text-white"
+                value={pickerIndustry}
+                onChange={(e) => {
+                  const nextIndustry = e.target.value;
+                  setPickerIndustry(nextIndustry);
+                  setPickerClientKey("");
+                  setPickerClientSearch("");
+                  if (nextIndustry) {
+                    loadConfig("industry", nextIndustry);
+                  }
+                }}
+              >
+                <option value="">Select industry...</option>
+                {list.industries.map((ind) => (
+                  <option key={ind} value={ind}>{ind}</option>
+                ))}
+              </select>
+
+              <input
+                type="text"
+                className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-sm text-white"
+                placeholder={pickerIndustry ? "Search clients..." : "Search clients or industries..."}
+                value={pickerClientSearch}
+                onChange={(e) => setPickerClientSearch(e.target.value)}
+              />
+
+              <select
+                className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-sm text-white disabled:opacity-50"
+                value={pickerClientKey}
+                onChange={(e) => {
+                  const nextKey = e.target.value;
+                  setPickerClientKey(nextKey);
+                  if (!nextKey) {
+                    if (pickerIndustry) loadConfig("industry", pickerIndustry);
+                    return;
+                  }
+                  const [industry, client] = nextKey.split("::");
+                  setPickerIndustry(industry || "");
+                  if (industry && client) loadConfig("client", industry, client);
+                }}
+              >
+                <option value="">Industry defaults...</option>
+                {(
+                  pickerIndustry
+                    ? (list.clients[pickerIndustry] || []).map((cli) => ({ industry: pickerIndustry, client: cli }))
+                    : Object.entries(list.clients).flatMap(([industry, clients]) =>
+                      (clients || []).map((client) => ({ industry, client }))
+                    )
+                ).filter(({ industry, client }) => {
+                  const q = pickerClientSearch.trim().toLowerCase();
+                  if (!q) return true;
+                  const clientMatch = client.toLowerCase().includes(q);
+                  const industryMatch = industry.toLowerCase().includes(q);
+                  return pickerIndustry ? clientMatch : (clientMatch || industryMatch);
+                }).map(({ industry, client }) => {
+                  const key = `${industry}::${client}`;
+                  return (
+                    <option key={key} value={key}>
+                      {pickerIndustry ? client : `${client} / ${industry}`}
+                    </option>
+                  );
+                })}
+                {(
+                  (
+                    pickerIndustry
+                      ? (list.clients[pickerIndustry] || []).map((cli) => ({ industry: pickerIndustry, client: cli }))
+                      : Object.entries(list.clients).flatMap(([industry, clients]) =>
+                        (clients || []).map((client) => ({ industry, client }))
+                      )
+                  ).filter(({ industry, client }) => {
+                    const q = pickerClientSearch.trim().toLowerCase();
+                    if (!q) return true;
+                    const clientMatch = client.toLowerCase().includes(q);
+                    const industryMatch = industry.toLowerCase().includes(q);
+                    return pickerIndustry ? clientMatch : (clientMatch || industryMatch);
+                  }).length === 0
+                ) && (
+                    <option value="" disabled>No matching clients</option>
+                  )}
+              </select>
+            </div>
           </div>
         )}
 
-        <div className="p-2 flex-1">
-          {list.industries.map((ind) => (
-            <div key={ind} className="mb-4">
-              <div className="flex justify-between items-center px-3 py-2 text-sm font-semibold text-gray-300 hover:bg-gray-700 rounded cursor-pointer group">
-                <div className="flex items-center gap-2" onClick={() => loadConfig("industry", ind)}>
-                  <Folder size={16} className="text-yellow-500" />
-                  {ind}
-                </div>
-                {user.role === 'admin' && (
-                  <div className="flex items-center gap-1 group-hover:opacity-100 opacity-0 transition-opacity">
-                    <button
-                      onClick={(e) => { e.stopPropagation(); openCreateClient(ind); }}
-                      className="text-gray-500 hover:text-green-400"
-                      title="Add Client"
-                    >
-                      <Plus size={14} />
-                    </button>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); deleteConfig("industry", ind); }}
-                      className="text-gray-500 hover:text-red-400"
-                      title="Delete Industry"
-                    >
-                      <Trash2 size={12} />
-                    </button>
-                  </div>
-                )}
-              </div>
-
-              <div className="ml-4 border-l-2 border-gray-700 pl-2 mt-1 space-y-1">
-                {list.clients[ind]?.map((cli) => (
-                  <div
-                    key={cli}
-                    className="flex justify-between items-center px-3 py-1.5 text-sm text-gray-400 hover:text-white hover:bg-gray-700 rounded cursor-pointer transition group"
-                    onClick={() => loadConfig("client", ind, cli)}
-                  >
-                    <div className="flex items-center gap-2">
-                      <FileJson size={14} className="text-blue-400" />
-                      {cli}
-                    </div>
-                    {user.role === 'admin' && (
-                      <div className="flex items-center gap-2 group-hover:opacity-100 opacity-0 transition-opacity">
-                        <button
-                          onClick={(e) => { e.stopPropagation(); openCopyClient(ind, cli); }}
-                          className="text-gray-600 hover:text-blue-400"
-                          title="Copy Client"
-                        >
-                          <span className="text-xs font-mono">CPY</span>
-                        </button>
-                        <button
-                          onClick={(e) => { e.stopPropagation(); deleteConfig("client", ind, cli); }}
-                          className="text-gray-600 hover:text-red-400"
-                          title="Delete Client"
-                        >
-                          <Trash2 size={12} />
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
+        {(selectedIndustry || selectedClient || canViewPhoneMappings) && (
+          <div className="p-4 border-b border-gray-700">
+            <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Left Panel Tabs</h3>
+            <div className="grid grid-cols-2 gap-1">
+              <button
+                onClick={() => {
+                  setActiveTab("workflows");
+                  setLeftEditorTab("none");
+                }}
+                className={`w-full text-left px-2 py-1.5 text-xs rounded transition ${leftEditorTab === "none" ? "bg-blue-600/20 text-blue-300 border border-blue-500/40" : "text-gray-400 hover:text-white hover:bg-gray-700"}`}
+              >
+                Workflow Only
+              </button>
+              <button
+                onClick={() => {
+                  setActiveTab("workflows");
+                  setLeftEditorTab("prompts");
+                }}
+                className={`w-full text-left px-2 py-1.5 text-xs rounded transition ${leftEditorTab === "prompts" ? "bg-blue-600/20 text-blue-300 border border-blue-500/40" : "text-gray-400 hover:text-white hover:bg-gray-700"}`}
+              >
+                Prompt Library
+              </button>
+              {selectedType === "client" && (
+                <button
+                  onClick={() => {
+                    setActiveTab("workflows");
+                    setLeftEditorTab("config");
+                  }}
+                  className={`w-full text-left px-2 py-1.5 text-xs rounded transition ${leftEditorTab === "config" ? "bg-blue-600/20 text-blue-300 border border-blue-500/40" : "text-gray-400 hover:text-white hover:bg-gray-700"}`}
+                >
+                  Client Config
+                </button>
+              )}
+              <button
+                onClick={() => {
+                  setActiveTab("workflows");
+                  setLeftEditorTab("json");
+                }}
+                className={`w-full text-left px-2 py-1.5 text-xs rounded transition ${leftEditorTab === "json" ? "bg-blue-600/20 text-blue-300 border border-blue-500/40" : "text-gray-400 hover:text-white hover:bg-gray-700"}`}
+              >
+                Raw JSON
+              </button>
             </div>
-          ))}
+          </div>
+        )}
+
+        <div className="p-2 flex-1 min-h-0 flex flex-col">
+          <div className="text-xs text-gray-500 px-2">
+            Client and workflow navigation is in this panel.
+          </div>
+          <div className="flex-1 min-h-0">
+            <WorkflowCopilot
+              industry={selectedIndustry}
+              client={selectedClient}
+              selectedWorkflowKey={selectedWorkflowKey}
+              editorContent={editorContent}
+            />
+          </div>
         </div>
       </div>
 
       {/* Main Editor */}
       <div className="flex-1 flex flex-col">
-        {selectedIndustry || activeTab === 'phone_mappings' || activeTab === 'users' ? (
+        {selectedIndustry || leftEditorTab === "phone_routing" || activeTab === 'phone_mappings' || activeTab === 'users' ? (
           <>
             <div className="h-16 flex items-center justify-between px-6 bg-gray-800 border-b border-gray-700">
               <div>
                 <h2 className="text-lg font-semibold text-white">
-                  {activeTab === 'phone_mappings' ? "Phone Number Routing" :
+                  {leftEditorTab === "phone_routing" || activeTab === 'phone_mappings' ? "Phone Number Routing" :
                     activeTab === 'users' ? "User Management" :
                       selectedType === 'industry' ? `${selectedIndustry} / defaults.json` :
                         selectedType === 'client' ? `${selectedIndustry} / ${selectedClient}.json` : "Dashboard"}
                 </h2>
                 {message && <span className={`text-sm ${message.includes('Error') || message.includes('Invalid') ? 'text-red-400' : 'text-green-400'}`}>{message}</span>}
-                {!canSave && (selectedIndustry || activeTab === "phone_mappings") && (
+                {!canSave && (selectedIndustry || leftEditorTab === "phone_routing" || activeTab === "phone_mappings") && (
                   <span className="text-xs text-yellow-400 block">Read-only access</span>
                 )}
               </div>
 
               {selectedIndustry && (
-                <div className="flex bg-gray-700 rounded p-1 gap-1">
-                  <button
-                    onClick={() => setActiveTab("prompts")}
-                    className={`px-3 py-1 text-sm rounded transition ${activeTab === "prompts" ? "bg-gray-600 text-white" : "text-gray-400 hover:text-white"}`}
-                  >
-                    Prompts
-                  </button>
-                  <button
-                    onClick={() => setActiveTab("workflows")}
-                    className={`px-3 py-1 text-sm rounded transition ${activeTab === "workflows" ? "bg-gray-600 text-white" : "text-gray-400 hover:text-white"}`}
-                  >
-                    Workflows
-                  </button>
-
-                  {selectedType === "client" && (
-                    <button
-                      onClick={() => setActiveTab("config")}
-                      className={`px-3 py-1 text-sm rounded transition ${activeTab === "config" ? "bg-gray-600 text-white" : "text-gray-400 hover:text-white"}`}
-                    >
-                      Client Config
-                    </button>
-                  )}
-                  <button
-                    onClick={() => setActiveTab("json")}
-                    className={`px-3 py-1 text-sm rounded transition ${activeTab === "json" ? "bg-gray-600 text-white" : "text-gray-400 hover:text-white"}`}
-                  >
-                    Raw JSON
-                  </button>
+                <div className="text-sm text-gray-400">
+                  Active View: <span className="text-white">{leftTabLabel}</span>
                 </div>
               )}
 
@@ -631,55 +935,202 @@ export default function Home() {
                   Loading configuration...
                 </div>
               )}
-              {activeTab === "json" && (
-                <textarea
-                  className="w-full h-full bg-gray-900 p-6 font-mono text-sm resize-none outline-none text-gray-300"
-                  value={editorContent}
-                  onChange={(e) => setEditorContent(e.target.value)}
-                  spellCheck={false}
-                  readOnly={!canSave}
-                />
-              )}
-
-              {activeTab === "prompts" && (
-                <PromptEditor
-                  jsonContent={isValidJson(editorContent) ? JSON.parse(editorContent) : {}}
-                  onChange={(newJson) => setEditorContent(JSON.stringify(newJson, null, 2))}
-                  canManagePromptLibrary={canManagePromptLibrary}
-                />
-              )}
-
               {activeTab === "workflows" && (
-                <WorkflowVisualizer
-                  key={`${selectedType}-${selectedIndustry}-${selectedClient}`}
-                  jsonContent={isValidJson(editorContent) ? JSON.parse(editorContent) : {}}
-                  onChange={(newJson) => setEditorContent(JSON.stringify(newJson, null, 2))}
-                  onOpenPrompts={() => setActiveTab("prompts")}
-                />
-              )}
+                leftEditorTab === "none" ? (
+                  <div className="h-full flex">
+                    <div className="w-56 border-r border-gray-700 bg-gray-800 p-3">
+                    <button
+                      onClick={() => toggleSection("context")}
+                      className="w-full flex items-center justify-between text-xs font-semibold uppercase tracking-wider text-gray-500 mb-2"
+                    >
+                      <span>Client Context</span>
+                      {collapsedSections.context ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
+                    </button>
+                    {!collapsedSections.context && (
+                      <div className="mb-3 rounded border border-gray-700 bg-gray-900/50 p-2 text-xs">
+                        <div className="text-gray-400">Industry</div>
+                        <div className="text-white truncate">{selectedIndustry || "-"}</div>
+                        <div className="text-gray-400 mt-2">Client</div>
+                        <div className="text-white truncate">{selectedClient || "Industry Defaults"}</div>
+                      </div>
+                    )}
 
-              {activeTab === "config" && selectedType === "client" && (
-                <ClientConfigForm
-                  key={`client-config-${selectedType}-${selectedIndustry}-${selectedClient}`}
-                  jsonContent={isValidJson(editorContent) ? JSON.parse(editorContent) : {}}
-                  onChange={(newJson) => setEditorContent(JSON.stringify(newJson, null, 2))}
-                  assignedPhoneNumber={Object.entries(phoneMappings).find(
-                    ([_, val]) => val.client_id?.trim().toLowerCase() === selectedClient?.trim().toLowerCase() && val.industry?.trim().toLowerCase() === selectedIndustry?.trim().toLowerCase()
-                  )?.[0]}
-                  canManageVoiceLibrary={canManageVoiceLibrary}
-                  canManageIntentLibrary={canManageIntentLibrary}
-                />
-              )}
+                    <div className="flex items-center justify-between mb-2">
+                      <button
+                        onClick={() => toggleSection("workflows")}
+                        className="flex items-center gap-1 text-xs font-semibold uppercase tracking-wider text-gray-500"
+                      >
+                        {collapsedSections.workflows ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
+                        Workflows
+                      </button>
+                      <button
+                        onClick={() => setAddWorkflowRequestNonce(Date.now())}
+                        className="text-[10px] px-2 py-1 rounded border border-gray-600 text-gray-300 hover:text-white hover:border-blue-500"
+                        title="Add Workflow"
+                      >
+                        + Add
+                      </button>
+                    </div>
+                    {!collapsedSections.workflows && (
+                      <>
+                        <input
+                          type="text"
+                          className="w-full mb-2 bg-gray-900 border border-gray-700 rounded px-2 py-1 text-xs text-white"
+                          placeholder="Filter workflows..."
+                          value={workflowFilter}
+                          onChange={(e) => setWorkflowFilter(e.target.value)}
+                        />
+                        <div className="space-y-1 mb-4 max-h-48 overflow-y-auto pr-1">
+                          {filteredWorkflowKeys.length === 0 && (
+                            <div className="text-xs text-gray-500 px-2 py-1">
+                              {workflowKeys.length === 0 ? "No workflows" : "No workflow matches"}
+                            </div>
+                          )}
+                          {filteredWorkflowKeys.map((key) => (
+                            <button
+                              key={key}
+                              onClick={() => setSelectedWorkflowKey(key)}
+                              className={`w-full text-left px-2 py-1.5 rounded text-xs transition ${selectedWorkflowKey === key
+                                ? "bg-blue-600/20 text-blue-300 border border-blue-500/40"
+                                : "text-gray-400 hover:text-white hover:bg-gray-700"}`}
+                            >
+                              {key === "first_response" ? "Initial Response" : key}
+                            </button>
+                          ))}
+                        </div>
+                      </>
+                    )}
 
-              {activeTab === "phone_mappings" && (
-                <PhoneMappings
-                  industries={list.industries}
-                  clients={list.clients}
-                  onSave={(data) => {
-                    setEditorContent(JSON.stringify(data, null, 2));
-                  }}
-                  readOnly={!canEditPhoneMappings}
-                />
+                    <button
+                      onClick={() => toggleSection("picker")}
+                      className="w-full flex items-center justify-between text-xs font-semibold uppercase tracking-wider text-gray-500 mb-3"
+                    >
+                      <span>Node Picker</span>
+                      {collapsedSections.picker ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
+                    </button>
+                    {!collapsedSections.picker && (
+                      <div className="space-y-2 text-sm">
+                        <div className="text-[10px] text-gray-500">
+                          Click to add, or drag onto canvas to place.
+                        </div>
+                        <button
+                          draggable
+                          onDragStart={(e) => beginNodeDrag(e, "prompt")}
+                          onClick={() => setNodePickerAction({ type: "prompt", nonce: Date.now() })}
+                          className="w-full text-left px-3 py-2 rounded bg-gray-800 border border-gray-700 text-gray-300 hover:border-green-500 hover:text-white"
+                        >
+                          Prompt Node
+                        </button>
+                        <button
+                          draggable
+                          onDragStart={(e) => beginNodeDrag(e, "action")}
+                          onClick={() => setNodePickerAction({ type: "action", nonce: Date.now() })}
+                          className="w-full text-left px-3 py-2 rounded bg-gray-800 border border-gray-700 text-gray-300 hover:border-blue-500 hover:text-white"
+                        >
+                          Action Node
+                        </button>
+                        <button
+                          draggable
+                          onDragStart={(e) => beginNodeDrag(e, "condition")}
+                          onClick={() => setNodePickerAction({ type: "condition", nonce: Date.now() })}
+                          className="w-full text-left px-3 py-2 rounded bg-gray-800 border border-gray-700 text-gray-300 hover:border-yellow-500 hover:text-white"
+                        >
+                          Condition Node
+                        </button>
+                        <button
+                          draggable
+                          onDragStart={(e) => beginNodeDrag(e, "knowledge")}
+                          onClick={() => setNodePickerAction({ type: "knowledge", nonce: Date.now() })}
+                          className="w-full text-left px-3 py-2 rounded bg-gray-800 border border-gray-700 text-gray-300 hover:border-cyan-500 hover:text-white"
+                        >
+                          Knowledge Base Node
+                        </button>
+                        <button
+                          draggable
+                          onDragStart={(e) => beginNodeDrag(e, "handoff")}
+                          onClick={() => setNodePickerAction({ type: "handoff", nonce: Date.now() })}
+                          className="w-full text-left px-3 py-2 rounded bg-gray-800 border border-gray-700 text-gray-300 hover:border-purple-500 hover:text-white"
+                        >
+                          Handoff Node
+                        </button>
+                      </div>
+                    )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <WorkflowVisualizer
+                        key={`${selectedType}-${selectedIndustry}-${selectedClient}`}
+                        jsonContent={isValidJson(editorContent) ? JSON.parse(editorContent) : {}}
+                        onChange={(newJson) => setEditorContent(JSON.stringify(newJson, null, 2))}
+                        onOpenPrompts={() => {
+                          setActiveTab("workflows");
+                          setLeftEditorTab("prompts");
+                        }}
+                        selectedWorkflowKey={selectedWorkflowKey}
+                        onSelectedWorkflowKeyChange={setSelectedWorkflowKey}
+                        showWorkflowTabs={false}
+                        showFloatingEditor={false}
+                        showDockedInspector={true}
+                        showInternalToolbar={false}
+                        nodePickerAction={nodePickerAction}
+                        addWorkflowRequestNonce={addWorkflowRequestNonce}
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  <div className="h-full p-4 overflow-y-auto">
+                    {leftEditorTab === "json" && (
+                      <textarea
+                        className="w-full h-full bg-gray-900 border border-gray-700 rounded p-3 font-mono text-xs resize-none outline-none text-gray-300"
+                        value={editorContent}
+                        onChange={(e) => setEditorContent(e.target.value)}
+                        spellCheck={false}
+                        readOnly={!canSave}
+                      />
+                    )}
+
+                    {leftEditorTab === "prompts" && (
+                      <div className="h-full min-h-0 overflow-y-auto border border-gray-700 rounded bg-gray-900/50">
+                        <PromptEditor
+                          jsonContent={isValidJson(editorContent) ? JSON.parse(editorContent) : {}}
+                          onChange={(newJson) => setEditorContent(JSON.stringify(newJson, null, 2))}
+                          canManagePromptLibrary={canManagePromptLibrary}
+                        />
+                      </div>
+                    )}
+
+                    {leftEditorTab === "config" && selectedType === "client" && (
+                      <div className="h-full min-h-0 overflow-y-auto border border-gray-700 rounded bg-gray-900/50">
+                        <ClientConfigForm
+                          key={`full-client-config-${selectedType}-${selectedIndustry}-${selectedClient}`}
+                          jsonContent={isValidJson(editorContent) ? JSON.parse(editorContent) : {}}
+                          onChange={(newJson) => setEditorContent(JSON.stringify(newJson, null, 2))}
+                          assignedPhoneNumber={Object.entries(phoneMappings).find(
+                            ([_, val]) => val.client_id?.trim().toLowerCase() === selectedClient?.trim().toLowerCase() && val.industry?.trim().toLowerCase() === selectedIndustry?.trim().toLowerCase()
+                          )?.[0]}
+                          canManageVoiceLibrary={canManageVoiceLibrary}
+                          canManageIntentLibrary={canManageIntentLibrary}
+                        />
+                      </div>
+                    )}
+
+                    {leftEditorTab === "config" && selectedType !== "client" && (
+                      <div className="text-xs text-gray-500">Select a client to edit Client Config.</div>
+                    )}
+
+                    {leftEditorTab === "phone_routing" && canViewPhoneMappings && (
+                      <div className="h-full min-h-0 overflow-y-auto border border-gray-700 rounded bg-gray-900/50">
+                        <PhoneMappings
+                          industries={list.industries}
+                          clients={list.clients}
+                          onSave={(data) => {
+                            setPhoneMappingsContent(JSON.stringify(data, null, 2));
+                          }}
+                          readOnly={!canEditPhoneMappings}
+                        />
+                      </div>
+                    )}
+                  </div>
+                )
               )}
 
               {activeTab === 'users' && canManageUsers && (

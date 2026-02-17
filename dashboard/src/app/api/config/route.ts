@@ -4,7 +4,7 @@ import fs from 'fs';
 import path from 'path';
 import { execSync } from 'child_process';
 import { getAuthenticatedUser } from "@/lib/auth";
-import { filterConfigListForUser, getUserPermissions, hasClientAccess, hasIndustryAccess, isSuperAdmin } from "@/lib/rbac";
+import { filterConfigListForUser, getUserPermissions, hasClientAccess, hasIndustryAccess, isAdminUser, isSuperAdmin } from "@/lib/rbac";
 
 export const dynamic = 'force-dynamic';
 
@@ -562,7 +562,7 @@ export async function POST(req: NextRequest) {
                     // allowed (reusing prompt-library management permission)
                 } else if (type === 'voice_library') {
                     // Admin-only (product requirement): do not allow non-admins even if permission flags are present.
-                    if (user.role !== 'admin') return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+                    if (!isAdminUser(user)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
                     if (!(permissions.can_manage_voice_library || isSuperAdmin(user))) {
                         return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
                     }
@@ -576,7 +576,7 @@ export async function POST(req: NextRequest) {
             // Create/Delete actions restricted to Admin usually, 
             // but maybe creating a client is allowed if you have access to that industry? 
             // Implementing strict admin-only for creat/delete for now as per plan
-            if (user.role !== 'admin') return NextResponse.json({ error: 'Forbidden: Admin Only' }, { status: 403 });
+            if (!isAdminUser(user)) return NextResponse.json({ error: 'Forbidden: Admin Only' }, { status: 403 });
         }
 
         if (action === 'save_variant' || action === 'load_variant') {
@@ -678,7 +678,7 @@ export async function POST(req: NextRequest) {
             if (type !== 'voice_library') {
                 return NextResponse.json({ error: 'Invalid type for import_voices' }, { status: 400 });
             }
-            if (user.role !== 'admin') {
+            if (!isAdminUser(user)) {
                 return NextResponse.json({ error: 'Forbidden: Admin Only' }, { status: 403 });
             }
             if (!(permissions.can_manage_voice_library || isSuperAdmin(user))) {

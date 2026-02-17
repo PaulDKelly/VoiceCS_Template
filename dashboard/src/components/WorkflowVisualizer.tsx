@@ -5,6 +5,8 @@ import ReactFlow, {
     MiniMap,
     Controls,
     Background,
+    ReactFlowProvider,
+    useReactFlow,
     useNodesState,
     useEdgesState,
     addEdge,
@@ -21,6 +23,14 @@ interface WorkflowVisualizerProps {
     onChange: (newContent: any) => void;
     industryDefaults?: any;
     onOpenPrompts?: () => void;
+    selectedWorkflowKey?: string | null;
+    onSelectedWorkflowKeyChange?: (workflowKey: string | null) => void;
+    showWorkflowTabs?: boolean;
+    showFloatingEditor?: boolean;
+    showDockedInspector?: boolean;
+    showInternalToolbar?: boolean;
+    nodePickerAction?: { type: 'prompt' | 'action' | 'condition' | 'knowledge' | 'handoff'; nonce: number } | null;
+    addWorkflowRequestNonce?: number;
 }
 
 import { Handle, Position } from 'reactflow';
@@ -87,9 +97,32 @@ const initialNodes = [
 ];
 const initialEdges: Edge[] = [];
 
-export default function WorkflowVisualizer({ jsonContent, onChange, industryDefaults, onOpenPrompts }: WorkflowVisualizerProps) {
+export default function WorkflowVisualizer(props: WorkflowVisualizerProps) {
+    return (
+        <ReactFlowProvider>
+            <WorkflowVisualizerInner {...props} />
+        </ReactFlowProvider>
+    );
+}
+
+function WorkflowVisualizerInner({
+    jsonContent,
+    onChange,
+    industryDefaults,
+    onOpenPrompts,
+    selectedWorkflowKey: selectedWorkflowKeyProp = null,
+    onSelectedWorkflowKeyChange,
+    showWorkflowTabs = true,
+    showFloatingEditor = true,
+    showDockedInspector = false,
+    showInternalToolbar = true,
+    nodePickerAction = null,
+    addWorkflowRequestNonce = 0
+}: WorkflowVisualizerProps) {
+    const { screenToFlowPosition } = useReactFlow();
     const [nodes, setNodes, onNodesChange] = useNodesState([]);
     const [edges, setEdges, onEdgesChange] = useEdgesState([]);
+    const [insertPreviewEdgeId, setInsertPreviewEdgeId] = useState<string | null>(null);
 
     // Selection State
     const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
@@ -104,7 +137,14 @@ export default function WorkflowVisualizer({ jsonContent, onChange, industryDefa
     const [showIntentModal, setShowIntentModal] = useState(false);
     const [newIntentName, setNewIntentName] = useState("");
 
-    const [selectedWorkflowKey, setSelectedWorkflowKey] = useState<string | null>(null);
+    const [internalSelectedWorkflowKey, setInternalSelectedWorkflowKey] = useState<string | null>(null);
+    const selectedWorkflowKey = selectedWorkflowKeyProp ?? internalSelectedWorkflowKey;
+    const setSelectedWorkflowKey = (key: string | null) => {
+        setInternalSelectedWorkflowKey(key);
+        if (onSelectedWorkflowKeyChange) {
+            onSelectedWorkflowKeyChange(key);
+        }
+    };
     const [nodePanelPos, setNodePanelPos] = useState<{ x: number; y: number } | null>(null);
     const [edgePanelPos, setEdgePanelPos] = useState<{ x: number; y: number } | null>(null);
     const dragState = useRef<{
@@ -331,65 +371,211 @@ export default function WorkflowVisualizer({ jsonContent, onChange, industryDefa
     };
 
     useEffect(() => {
+        if (!showFloatingEditor) return;
         if (selectedNodeId && !nodePanelPos && typeof window !== 'undefined') {
             setNodePanelPos({
                 x: Math.max(20, Math.floor(window.innerWidth / 2 - 160)),
                 y: Math.max(20, Math.floor(window.innerHeight / 2 - 220))
             });
         }
-    }, [selectedNodeId, nodePanelPos]);
+    }, [selectedNodeId, nodePanelPos, showFloatingEditor]);
 
     useEffect(() => {
+        if (!showFloatingEditor) return;
         if (selectedEdgeId && !edgePanelPos && typeof window !== 'undefined') {
             setEdgePanelPos({
                 x: Math.max(20, Math.floor(window.innerWidth / 2 - 160)),
                 y: Math.max(20, Math.floor(window.innerHeight / 2 - 220))
             });
         }
-    }, [selectedEdgeId, edgePanelPos]);
+    }, [selectedEdgeId, edgePanelPos, showFloatingEditor]);
 
-    // CRUD Operations
-    const handleAddNode = () => {
+    const makeNode = (
+        nodeType: 'prompt' | 'action' | 'condition' | 'knowledge' | 'handoff',
+        position?: { x: number; y: number }
+    ): Node => {
         const newId = (Math.random() * 10000).toFixed(0);
-        const newNode: Node = {
+        const pos = position || { x: 250, y: 100 + (nodes.length * 50) };
+        if (nodeType === 'handoff') {
+            return {
+                id: newId,
+                position: pos,
+                data: { label: 'Handoff', targetWorkflow: '' },
+                type: 'handoff'
+            };
+        }
+        if (nodeType === 'action') {
+            return {
+                id: newId,
+                position: pos,
+                data: { label: 'Action', actionType: 'email', actionConfig: {} },
+                type: 'action'
+            };
+        }
+        if (nodeType === 'knowledge') {
+            return {
+                id: newId,
+                position: pos,
+                data: { label: 'Knowledge Base', actionType: 'knowledge_search', actionConfig: {} },
+                type: 'action'
+            };
+        }
+        if (nodeType === 'condition') {
+            return {
+                id: newId,
+                position: pos,
+                data: { label: 'Condition' },
+                type: 'custom'
+            };
+        }
+        return {
             id: newId,
-            position: { x: 250, y: 100 + (nodes.length * 50) },
-            data: { label: `New Step` },
+            position: pos,
+            data: { label: 'New Step' },
             type: 'custom'
         };
-        setNodes((nds) => nds.concat(newNode));
-        setSelectedNodeId(newId);
-        setSelectedEdgeId(null);
-        setNodeLabel("New Step");
     };
 
-    const handleAddHandoffNode = () => {
-        const newId = (Math.random() * 10000).toFixed(0);
-        const newNode: Node = {
-            id: newId,
-            position: { x: 250, y: 100 + (nodes.length * 50) },
-            data: { label: `Handoff`, targetWorkflow: '' },
-            type: 'handoff'
+    const findEdgeForInsertion = (position: { x: number; y: number }) => {
+        const nodeCenter = (nodeId: string) => {
+            const n = nodes.find((x) => x.id === nodeId);
+            if (!n) return null;
+            const width = (n.width as number) || 125;
+            const height = (n.height as number) || 42;
+            return { x: n.position.x + width / 2, y: n.position.y + height / 2 };
         };
-        setNodes((nds) => nds.concat(newNode));
-        setSelectedNodeId(newId);
-        setSelectedEdgeId(null);
-        setNodeLabel("Handoff");
+        let best: { edge: Edge; distance: number } | null = null;
+        for (const e of edges) {
+            const s = nodeCenter(e.source);
+            const t = nodeCenter(e.target);
+            if (!s || !t) continue;
+            const dx = t.x - s.x;
+            const dy = t.y - s.y;
+            const lenSq = dx * dx + dy * dy;
+            if (lenSq < 1) continue;
+            const px = position.x - s.x;
+            const py = position.y - s.y;
+            const tParam = Math.max(0, Math.min(1, (px * dx + py * dy) / lenSq));
+            // Avoid snapping too close to endpoints.
+            if (tParam < 0.2 || tParam > 0.8) continue;
+            const cx = s.x + tParam * dx;
+            const cy = s.y + tParam * dy;
+            const dist = Math.hypot(position.x - cx, position.y - cy);
+            if (dist <= 28 && (!best || dist < best.distance)) {
+                best = { edge: e, distance: dist };
+            }
+        }
+        return best?.edge || null;
     };
 
-    const handleAddActionNode = () => {
-        const newId = (Math.random() * 10000).toFixed(0);
-        const newNode: Node = {
-            id: newId,
-            position: { x: 250, y: 100 + (nodes.length * 50) },
-            data: { label: `Action`, actionType: 'email', actionConfig: {} },
-            type: 'action'
-        };
+    const insertNode = (
+        nodeType: 'prompt' | 'action' | 'condition' | 'knowledge' | 'handoff',
+        position?: { x: number; y: number }
+    ) => {
+        const newNode = makeNode(nodeType, position);
+        const edgeToSplit = position ? findEdgeForInsertion(position) : null;
         setNodes((nds) => nds.concat(newNode));
-        setSelectedNodeId(newId);
+        if (edgeToSplit) {
+            setEdges((eds) => {
+                const remaining = eds.filter((e) => e.id !== edgeToSplit.id);
+                const firstLabel = edgeToSplit.label ? String(edgeToSplit.label) : 'Next';
+                const first: Edge = {
+                    id: `e${edgeToSplit.source}-${newNode.id}`,
+                    source: edgeToSplit.source,
+                    target: newNode.id,
+                    label: firstLabel
+                };
+                const second: Edge = {
+                    id: `e${newNode.id}-${edgeToSplit.target}`,
+                    source: newNode.id,
+                    target: edgeToSplit.target,
+                    label: 'Next'
+                };
+                return remaining.concat(first, second);
+            });
+        }
+        setSelectedNodeId(newNode.id);
         setSelectedEdgeId(null);
-        setNodeLabel("Action");
+        setNodeLabel(String(newNode.data?.label || 'New Step'));
     };
+
+    // CRUD Operations
+    const handleAddNode = () => insertNode('prompt');
+    const handleAddHandoffNode = () => insertNode('handoff');
+    const handleAddActionNode = () => insertNode('action');
+    const handleAddConditionNode = () => insertNode('condition');
+    const handleAddKnowledgeBaseNode = () => insertNode('knowledge');
+
+    useEffect(() => {
+        if (!nodePickerAction) return;
+        switch (nodePickerAction.type) {
+            case 'prompt':
+                handleAddNode();
+                break;
+            case 'action':
+                handleAddActionNode();
+                break;
+            case 'condition':
+                handleAddConditionNode();
+                break;
+            case 'knowledge':
+                handleAddKnowledgeBaseNode();
+                break;
+            case 'handoff':
+                handleAddHandoffNode();
+                break;
+            default:
+                break;
+        }
+    }, [nodePickerAction?.nonce]);
+
+    useEffect(() => {
+        if (!addWorkflowRequestNonce) return;
+        setShowIntentModal(true);
+    }, [addWorkflowRequestNonce]);
+
+    const onCanvasDragOver = useCallback((event: React.DragEvent) => {
+        event.preventDefault();
+        event.dataTransfer.dropEffect = 'move';
+        const nodeType = event.dataTransfer.getData('application/x-node-type');
+        if (!nodeType) {
+            if (insertPreviewEdgeId !== null) setInsertPreviewEdgeId(null);
+            return;
+        }
+        const position = screenToFlowPosition({ x: event.clientX, y: event.clientY });
+        const edgeToSplit = findEdgeForInsertion(position);
+        const nextId = edgeToSplit?.id || null;
+        if (nextId !== insertPreviewEdgeId) setInsertPreviewEdgeId(nextId);
+    }, [screenToFlowPosition, nodes, edges, insertPreviewEdgeId]);
+
+    const onCanvasDragLeave = useCallback((event: React.DragEvent) => {
+        const related = event.relatedTarget as globalThis.Node | null;
+        if (related && event.currentTarget.contains(related)) return;
+        setInsertPreviewEdgeId(null);
+    }, []);
+
+    const onCanvasDrop = useCallback((event: React.DragEvent) => {
+        event.preventDefault();
+        const nodeType = event.dataTransfer.getData('application/x-node-type') as
+            'prompt' | 'action' | 'condition' | 'knowledge' | 'handoff' | '';
+        setInsertPreviewEdgeId(null);
+        if (!nodeType) return;
+        const position = screenToFlowPosition({ x: event.clientX, y: event.clientY });
+        insertNode(nodeType, position);
+    }, [screenToFlowPosition, nodes, edges]);
+
+    const renderEdges = edges.map((edge) => {
+        if (edge.id !== insertPreviewEdgeId) return edge;
+        return {
+            ...edge,
+            animated: true,
+            style: {
+                ...(edge.style || {}),
+                stroke: '#22d3ee',
+                strokeWidth: 3,
+            },
+        };
+    });
 
     const handleDeleteNode = () => {
         if (!selectedNodeId) return;
@@ -747,29 +933,31 @@ export default function WorkflowVisualizer({ jsonContent, onChange, industryDefa
                 }
             `}</style>
             {/* Tab Bar */}
-            <div className="flex bg-gray-800 border-b border-gray-700 px-2 pt-2 gap-1 overflow-x-auto">
-                {workflowKeys.map(key => (
-                    <button
-                        key={key}
-                        onClick={() => setSelectedWorkflowKey(key)}
-                        className={`px-4 py-2 text-sm font-medium rounded-t-lg transition-colors whitespace-nowrap ${selectedWorkflowKey === key
-                            ? 'bg-gray-700 text-blue-400 border-t-2 border-blue-500'
-                            : 'text-gray-400 hover:text-white hover:bg-gray-700'
-                            }`}
-                    >
-                        {key === 'first_response' ? 'Initial Response' : key.charAt(0).toUpperCase() + key.slice(1)}
-                    </button>
-                ))}
+            {showWorkflowTabs && (
+                <div className="flex bg-gray-800 border-b border-gray-700 px-2 pt-2 gap-1 overflow-x-auto">
+                    {workflowKeys.map(key => (
+                        <button
+                            key={key}
+                            onClick={() => setSelectedWorkflowKey(key)}
+                            className={`px-4 py-2 text-sm font-medium rounded-t-lg transition-colors whitespace-nowrap ${selectedWorkflowKey === key
+                                ? 'bg-gray-700 text-blue-400 border-t-2 border-blue-500'
+                                : 'text-gray-400 hover:text-white hover:bg-gray-700'
+                                }`}
+                        >
+                            {key === 'first_response' ? 'Initial Response' : key.charAt(0).toUpperCase() + key.slice(1)}
+                        </button>
+                    ))}
 
-                {/* Add New Workflow Button */}
-                <button
-                    onClick={() => setShowIntentModal(true)}
-                    className="px-3 py-2 text-gray-500 hover:text-green-400"
-                    title="Add Intent / Workflow"
-                >
-                    <Plus size={16} />
-                </button>
-            </div>
+                    {/* Add New Workflow Button */}
+                    <button
+                        onClick={() => setShowIntentModal(true)}
+                        className="px-3 py-2 text-gray-500 hover:text-green-400"
+                        title="Add Intent / Workflow"
+                    >
+                        <Plus size={16} />
+                    </button>
+                </div>
+            )}
 
 
             {/* Add Intent Modal */}
@@ -828,35 +1016,37 @@ export default function WorkflowVisualizer({ jsonContent, onChange, industryDefa
 
             <div className="flex-1 relative flex overflow-hidden">
                 {/* Toolbar */}
-                <div className="absolute top-2 right-2 z-10 flex gap-2">
-                    <button
-                        onClick={handleAddNode}
-                        className="flex items-center gap-2 bg-green-600 hover:bg-green-500 text-white px-3 py-1 rounded text-sm shadow mb-2"
-                    >
-                        <Plus size={16} /> Add Step
-                    </button>
-                    <button
-                        onClick={handleAddHandoffNode}
-                        className="flex items-center gap-2 bg-purple-600 hover:bg-purple-500 text-white px-3 py-1 rounded text-sm shadow mb-2"
-                    >
-                        <Plus size={16} /> Add Handoff
-                    </button>
-                    <button
-                        onClick={handleAddActionNode}
-                        className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white px-3 py-1 rounded text-sm shadow mb-2"
-                    >
-                        <Plus size={16} /> Add Action
-                    </button>
-                    <div className="flex items-center gap-2 bg-blue-900/50 text-blue-200 px-3 py-1 rounded text-xs shadow mb-2 border border-blue-800">
-                        Auto-saving...
+                {showInternalToolbar && (
+                    <div className="absolute top-2 right-2 z-10 flex gap-2">
+                        <button
+                            onClick={handleAddNode}
+                            className="flex items-center gap-2 bg-green-600 hover:bg-green-500 text-white px-3 py-1 rounded text-sm shadow mb-2"
+                        >
+                            <Plus size={16} /> Add Step
+                        </button>
+                        <button
+                            onClick={handleAddHandoffNode}
+                            className="flex items-center gap-2 bg-purple-600 hover:bg-purple-500 text-white px-3 py-1 rounded text-sm shadow mb-2"
+                        >
+                            <Plus size={16} /> Add Handoff
+                        </button>
+                        <button
+                            onClick={handleAddActionNode}
+                            className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white px-3 py-1 rounded text-sm shadow mb-2"
+                        >
+                            <Plus size={16} /> Add Action
+                        </button>
+                        <div className="flex items-center gap-2 bg-blue-900/50 text-blue-200 px-3 py-1 rounded text-xs shadow mb-2 border border-blue-800">
+                            Auto-saving...
+                        </div>
                     </div>
-                </div>
+                )}
 
                 {/* Main Canvas */}
-                <div className="flex-1 h-full relative">
+                <div className="flex-1 h-full relative" onDragOver={onCanvasDragOver} onDrop={onCanvasDrop} onDragLeave={onCanvasDragLeave}>
                     <ReactFlow
                         nodes={nodes}
-                        edges={edges}
+                        edges={renderEdges}
                         nodeTypes={nodeTypes}
                         onNodesChange={onNodesChange}
                         onEdgesChange={onEdgesChange}
@@ -873,19 +1063,23 @@ export default function WorkflowVisualizer({ jsonContent, onChange, industryDefa
                 </div>
 
                 {/* Edit Panel (Node) */}
-                {selectedNode && nodePanelPos && (
+                {selectedNode && (showFloatingEditor ? !!nodePanelPos : showDockedInspector) && (
                     <div
-                        className="absolute w-96 max-h-[88vh] overflow-y-auto bg-gray-800 border-2 border-blue-500 rounded-lg shadow-xl p-4 z-20 flex flex-col gap-3"
-                        style={{ left: nodePanelPos.x, top: nodePanelPos.y }}
+                        className={showFloatingEditor
+                            ? "absolute w-96 max-h-[88vh] overflow-y-auto bg-gray-800 border-2 border-blue-500 rounded-lg shadow-xl p-4 z-20 flex flex-col gap-3"
+                            : "w-96 h-full overflow-y-auto bg-gray-800 border-l border-gray-700 p-4 flex flex-col gap-3"}
+                        style={showFloatingEditor && nodePanelPos ? { left: nodePanelPos.x, top: nodePanelPos.y } : undefined}
                     >
                         <div
-                            className="flex justify-between items-center border-b border-gray-700 pb-2 cursor-move"
-                            onMouseDown={(e) => startDrag('node', e)}
+                            className={`flex justify-between items-center border-b border-gray-700 pb-2 ${showFloatingEditor ? "cursor-move" : ""}`}
+                            onMouseDown={showFloatingEditor ? (e) => startDrag('node', e) : undefined}
                         >
                             <span className="text-sm font-bold text-blue-400">Edit Node ({selectedNodeId})</span>
-                            <button onClick={() => setSelectedNodeId(null)} className="text-gray-400 hover:text-white">
-                                <X size={16} />
-                            </button>
+                            {showFloatingEditor && (
+                                <button onClick={() => setSelectedNodeId(null)} className="text-gray-400 hover:text-white">
+                                    <X size={16} />
+                                </button>
+                            )}
                         </div>
 
                         <div>
@@ -1459,19 +1653,23 @@ export default function WorkflowVisualizer({ jsonContent, onChange, industryDefa
                 )}
 
                 {/* Edit Panel (Edge) */}
-                {selectedEdgeId && edgePanelPos && (
+                {selectedEdgeId && (showFloatingEditor ? !!edgePanelPos : showDockedInspector) && (
                     <div
-                        className="absolute w-80 bg-gray-800 border-2 border-yellow-500 rounded-lg shadow-xl p-4 z-20 flex flex-col gap-3"
-                        style={{ left: edgePanelPos.x, top: edgePanelPos.y }}
+                        className={showFloatingEditor
+                            ? "absolute w-80 bg-gray-800 border-2 border-yellow-500 rounded-lg shadow-xl p-4 z-20 flex flex-col gap-3"
+                            : "w-96 h-full overflow-y-auto bg-gray-800 border-l border-gray-700 p-4 flex flex-col gap-3"}
+                        style={showFloatingEditor && edgePanelPos ? { left: edgePanelPos.x, top: edgePanelPos.y } : undefined}
                     >
                         <div
-                            className="flex justify-between items-center border-b border-gray-700 pb-2 cursor-move"
-                            onMouseDown={(e) => startDrag('edge', e)}
+                            className={`flex justify-between items-center border-b border-gray-700 pb-2 ${showFloatingEditor ? "cursor-move" : ""}`}
+                            onMouseDown={showFloatingEditor ? (e) => startDrag('edge', e) : undefined}
                         >
                             <span className="text-sm font-bold text-yellow-500">Edit Connection</span>
-                            <button onClick={() => setSelectedEdgeId(null)} className="text-gray-400 hover:text-white">
-                                <X size={16} />
-                            </button>
+                            {showFloatingEditor && (
+                                <button onClick={() => setSelectedEdgeId(null)} className="text-gray-400 hover:text-white">
+                                    <X size={16} />
+                                </button>
+                            )}
                         </div>
 
                         <div>
@@ -1493,6 +1691,13 @@ export default function WorkflowVisualizer({ jsonContent, onChange, industryDefa
                                 <Trash2 size={16} /> Delete Connection
                             </button>
                         </div>
+                    </div>
+                )}
+
+                {!selectedNode && !selectedEdgeId && showDockedInspector && !showFloatingEditor && (
+                    <div className="w-96 h-full overflow-y-auto bg-gray-800 border-l border-gray-700 p-4">
+                        <h4 className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-3">Node Inspector</h4>
+                        <p className="text-sm text-gray-400">Select a node or connection to edit.</p>
                     </div>
                 )}
             </div>
