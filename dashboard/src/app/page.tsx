@@ -459,9 +459,13 @@ export default function Home() {
   const workflowKeys = (() => {
     if (!isValidJson(editorContent)) return [] as string[];
     const parsed = JSON.parse(editorContent);
-    const intents = Array.isArray(parsed?.intents) ? parsed.intents.filter((k: string) => k !== "general") : [];
-    const workflows = parsed?.workflows ? Object.keys(parsed.workflows).filter((k) => k !== "general") : [];
-    return Array.from(new Set([...intents, ...workflows]));
+    const rules = parsed?.intent_routing_rules || {};
+    const intents: string[] = Array.isArray(parsed?.intents)
+      ? parsed.intents.filter((k: string) => k !== "general" && rules?.[k]?.enabled !== false)
+      : [];
+    const workflows: string[] = parsed?.workflows ? Object.keys(parsed.workflows).filter((k) => k !== "general") : [];
+    const base: string[] = intents.length ? intents : workflows;
+    return Array.from(new Set<string>(base));
   })();
   const filteredWorkflowKeys = workflowKeys.filter((k) => k.toLowerCase().includes(workflowFilter.trim().toLowerCase()));
 
@@ -805,6 +809,65 @@ export default function Home() {
                     <option value="" disabled>No matching clients</option>
                   )}
               </select>
+              {isAdmin && (
+                <div className="grid grid-cols-3 gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const industryForCreate = pickerIndustry || selectedIndustry;
+                      if (!industryForCreate) {
+                        alert("Select an industry first.");
+                        return;
+                      }
+                      openCreateClient(industryForCreate);
+                    }}
+                    className="px-2 py-1.5 text-xs rounded border border-gray-600 text-gray-300 hover:text-white hover:border-blue-500"
+                    title="Create a new client in selected industry"
+                  >
+                    + New Client
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const sourceKey = pickerClientKey || (selectedIndustry && selectedClient ? `${selectedIndustry}::${selectedClient}` : "");
+                      if (!sourceKey) {
+                        alert("Select a source client first.");
+                        return;
+                      }
+                      const [industryForCopy, clientForCopy] = sourceKey.split("::");
+                      if (!industryForCopy || !clientForCopy) {
+                        alert("Select a source client first.");
+                        return;
+                      }
+                      openCopyClient(industryForCopy, clientForCopy);
+                    }}
+                    className="px-2 py-1.5 text-xs rounded border border-gray-600 text-gray-300 hover:text-white hover:border-purple-500"
+                    title="Clone selected client (Admin only)"
+                  >
+                    Clone Client
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const sourceKey = pickerClientKey || (selectedIndustry && selectedClient ? `${selectedIndustry}::${selectedClient}` : "");
+                      if (!sourceKey) {
+                        alert("Select a client first.");
+                        return;
+                      }
+                      const [industryForDelete, clientForDelete] = sourceKey.split("::");
+                      if (!industryForDelete || !clientForDelete) {
+                        alert("Select a client first.");
+                        return;
+                      }
+                      deleteConfig("client", industryForDelete, clientForDelete);
+                    }}
+                    className="px-2 py-1.5 text-xs rounded border border-red-700 text-red-300 hover:text-white hover:bg-red-800/40"
+                    title="Remove selected client (Admin only)"
+                  >
+                    Remove
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -1061,6 +1124,7 @@ export default function Home() {
                         key={`${selectedType}-${selectedIndustry}-${selectedClient}`}
                         jsonContent={isValidJson(editorContent) ? JSON.parse(editorContent) : {}}
                         onChange={(newJson) => setEditorContent(JSON.stringify(newJson, null, 2))}
+                        isClientScope={selectedType === "client"}
                         onOpenPrompts={() => {
                           setActiveTab("workflows");
                           setLeftEditorTab("prompts");

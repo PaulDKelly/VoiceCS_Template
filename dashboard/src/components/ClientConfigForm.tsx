@@ -1514,7 +1514,7 @@ export default function ClientConfigForm({ jsonContent, onChange, assignedPhoneN
                 <section className="bg-gray-800 rounded-lg p-6 border border-gray-700">
                     <h3 className="text-lg font-semibold text-blue-400 mb-4">Intent Routing</h3>
                     <p className="text-sm text-gray-400 mb-4">
-                        Configure how the agent detects customer intents. Add keywords that trigger each workflow.
+                        Configure how the agent detects customer intents. The checkbox only enables/disables routing; "Remove" deletes the workflow intent from this client.
                     </p>
 
                     {visibleIntents.map((intent) => {
@@ -1541,15 +1541,34 @@ export default function ClientConfigForm({ jsonContent, onChange, assignedPhoneN
                                     </div>
                                     <button
                                         onClick={() => {
-                                            const newIntents = config.intents?.filter(i => i !== intent) || [];
-                                            handleChange("intents", newIntents);
-                                            const newRules = { ...rules };
-                                            delete newRules[intent];
-                                            handleChange("intent_routing_rules", newRules);
+                                            const normalize = (v: string) => String(v || "").trim().toLowerCase();
+                                            const target = normalize(intent);
+
+                                            const newIntents = (config.intents || []).filter((i) => normalize(i) !== target);
+
+                                            const newRules = Object.fromEntries(
+                                                Object.entries(rules).filter(([k]) => normalize(k) !== target)
+                                            );
+                                            const newWorkflows = Object.fromEntries(
+                                                Object.entries(config.workflows || {}).filter(([k]) => normalize(k) !== target)
+                                            );
+                                            const newBehavior = Object.fromEntries(
+                                                Object.entries(config.workflow_behavior || {}).filter(([k]) => normalize(k) !== target)
+                                            );
+
+                                            const nextConfig = {
+                                                ...config,
+                                                intents: newIntents,
+                                                intent_routing_rules: newRules,
+                                                workflows: newWorkflows,
+                                                workflow_behavior: newBehavior
+                                            };
+                                            setConfig(nextConfig);
+                                            onChange(nextConfig);
                                         }}
                                         className="text-red-400 hover:text-red-300 text-sm"
                                     >
-                                        Remove
+                                        Remove Intent
                                     </button>
                                 </div>
 

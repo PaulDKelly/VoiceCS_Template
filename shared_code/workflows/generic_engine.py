@@ -246,7 +246,8 @@ def _process_node(node_id: str, nodes: list, edges: list, session: dict, config:
         resolved = _resolve_template_var(var_name, session, config)
         if resolved is None:
             return f"[{var_name}]"
-        return str(resolved)
+        resolved_text = str(resolved)
+        return _to_spoken_value(var_name, resolved_text)
 
     prompt = re.sub(r"\{([\w\.]+)\}", replace_var, prompt)
     # Clean up punctuation/spacing if {name} was empty
@@ -609,6 +610,78 @@ def _resolve_template_var(var_name: str, session: dict, config: dict):
         else:
             return None
     return value
+
+
+def _to_spoken_phone(value: str) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return raw
+    # Conservative detection: only format values that are basically phone-like.
+    if re.search(r"[A-Za-z]", raw):
+        return raw
+
+    has_plus = raw.startswith("+")
+    digits = re.sub(r"\D", "", raw)
+    if len(digits) < 7 or len(digits) > 15:
+        return raw
+
+    spoken = ", ".join(list(digits))
+    if has_plus:
+        return f"plus, {spoken}"
+    return spoken
+
+
+def _to_spoken_email(value: str) -> str:
+    raw = str(value or "").strip()
+    if "@" not in raw:
+        return raw
+    spoken = raw
+    spoken = spoken.replace("@", " at ")
+    spoken = spoken.replace(".", " dot ")
+    spoken = spoken.replace("-", " dash ")
+    spoken = spoken.replace("_", " underscore ")
+    spoken = re.sub(r"\s{2,}", " ", spoken).strip()
+    return spoken
+
+
+def _to_spoken_postcode(value: str) -> str:
+    raw = str(value or "").strip().upper()
+    if not raw:
+        return raw
+    compact = re.sub(r"\s+", "", raw)
+    # UK-style conservative check: alnum 5-8 chars.
+    if not re.fullmatch(r"[A-Z0-9]{5,8}", compact):
+        return value
+    return ", ".join(list(compact))
+
+
+def _to_spoken_reference(value: str) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return raw
+    compact = re.sub(r"[\s\-_/]", "", raw)
+    # Keep this strict so normal text is not over-processed.
+    if not re.fullmatch(r"[A-Za-z0-9]{4,24}", compact):
+        return value
+    has_letter = bool(re.search(r"[A-Za-z]", compact))
+    has_digit = bool(re.search(r"\d", compact))
+    if not (has_letter and has_digit):
+        return value
+    return ", ".join(list(compact.upper()))
+
+
+def _to_spoken_value(var_name: str, value: str) -> str:
+    name = str(var_name or "").lower()
+    text = str(value or "")
+    if any(k in name for k in ("phone", "mobile", "tel")):
+        return _to_spoken_phone(text)
+    if "email" in name:
+        return _to_spoken_email(text)
+    if any(k in name for k in ("postcode", "post_code", "zip")):
+        return _to_spoken_postcode(text)
+    if any(k in name for k in ("reference", "ref", "ticket", "case", "order", "id")):
+        return _to_spoken_reference(text)
+    return text
 
 
 def _replace_vars(template: str, session: dict, config: dict, url_encode: bool = False) -> str:

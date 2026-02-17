@@ -22,6 +22,7 @@ interface WorkflowVisualizerProps {
     jsonContent: any;
     onChange: (newContent: any) => void;
     industryDefaults?: any;
+    isClientScope?: boolean;
     onOpenPrompts?: () => void;
     selectedWorkflowKey?: string | null;
     onSelectedWorkflowKeyChange?: (workflowKey: string | null) => void;
@@ -109,6 +110,7 @@ function WorkflowVisualizerInner({
     jsonContent,
     onChange,
     industryDefaults,
+    isClientScope = false,
     onOpenPrompts,
     selectedWorkflowKey: selectedWorkflowKeyProp = null,
     onSelectedWorkflowKeyChange,
@@ -147,6 +149,7 @@ function WorkflowVisualizerInner({
     };
     const [nodePanelPos, setNodePanelPos] = useState<{ x: number; y: number } | null>(null);
     const [edgePanelPos, setEdgePanelPos] = useState<{ x: number; y: number } | null>(null);
+    const isClientConfig = isClientScope;
     const dragState = useRef<{
         panel: 'node' | 'edge';
         startX: number;
@@ -202,7 +205,7 @@ function WorkflowVisualizerInner({
             });
             setNodes(normalizedNodes);
             setEdges(wf.edges || []);
-        } else if (selectedWorkflowKey && industryDefaults?.workflows && industryDefaults.workflows[selectedWorkflowKey]) {
+        } else if (!isClientConfig && selectedWorkflowKey && industryDefaults?.workflows && industryDefaults.workflows[selectedWorkflowKey]) {
             const wf = industryDefaults.workflows[selectedWorkflowKey];
             const normalizedNodes = (wf.nodes || []).map((node: any) => {
                 const nextType = !node.type || node.type === "default"
@@ -218,7 +221,7 @@ function WorkflowVisualizerInner({
             setNodes([]);
             setEdges([]);
         }
-    }, [selectedWorkflowKey, setNodes, setEdges, industryDefaults]);
+    }, [selectedWorkflowKey, setNodes, setEdges, industryDefaults, isClientConfig]);
 
     // One-time migration: ensure all nodes have a type persisted in JSON
     useEffect(() => {
@@ -889,10 +892,16 @@ function WorkflowVisualizerInner({
         setNewIntentName("");
     };
 
-    const intentKeys = (jsonContent.intents || []).filter((k: string) => k !== 'general');
+    const routingRules = (jsonContent.intent_routing_rules || {}) as Record<string, { enabled?: boolean }>;
+    const intentKeys = (jsonContent.intents || []).filter((k: string) => k !== 'general' && routingRules?.[k]?.enabled !== false);
     const contentWorkflows = jsonContent.workflows ? Object.keys(jsonContent.workflows).filter(k => k !== 'general') : [];
-    const defaultWorkflows = industryDefaults?.workflows ? Object.keys(industryDefaults.workflows).filter(k => k !== 'general') : [];
-    const workflowKeys = Array.from(new Set([...intentKeys, ...contentWorkflows, ...defaultWorkflows]));
+    const defaultWorkflows = (!isClientConfig && industryDefaults?.workflows)
+        ? Object.keys(industryDefaults.workflows).filter(k => k !== 'general')
+        : [];
+    const workflowKeys = Array.from(new Set([
+        ...(intentKeys.length ? intentKeys : contentWorkflows),
+        ...defaultWorkflows
+    ]));
     const promptKeysAll = jsonContent.prompts ? Object.keys(jsonContent.prompts) : [];
     const promptKeysByIntent = selectedWorkflowKey
         ? promptKeysAll.filter(k => k === selectedWorkflowKey || k.startsWith(`${selectedWorkflowKey}_`))
