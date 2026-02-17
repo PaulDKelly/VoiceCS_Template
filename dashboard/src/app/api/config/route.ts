@@ -16,8 +16,32 @@ type VoiceEntry = {
     default?: boolean;
 };
 
+type IntentLibraryEntry = {
+    name: string;
+    label?: string;
+    workflow_template?: any;
+};
+
 function getVoiceLibraryPath() {
     return path.join(getConfigPath(), 'voice_library.json');
+}
+
+function getIntentLibraryPath() {
+    return path.join(getConfigPath(), 'intent_library.json');
+}
+
+function getPromptLibraryPath() {
+    return path.join(getConfigPath(), 'prompt_library.json');
+}
+
+function getVariantDir(industry: string, client: string) {
+    return path.join(getConfigPath(), 'variants', industry, client);
+}
+
+function readJsonFileSafe(filePath: string) {
+    const raw = fs.readFileSync(filePath, 'utf-8');
+    const cleaned = raw.charCodeAt(0) === 0xfeff ? raw.slice(1) : raw;
+    return JSON.parse(cleaned);
 }
 
 function voiceKey(v: VoiceEntry) {
@@ -50,7 +74,7 @@ function normalizeVoice(v: VoiceEntry): VoiceEntry | null {
 function loadVoiceLibrary(): { voices: VoiceEntry[] } {
     const p = getVoiceLibraryPath();
     if (!fs.existsSync(p)) return { voices: [] };
-    const parsed = JSON.parse(fs.readFileSync(p, 'utf-8'));
+    const parsed = readJsonFileSafe(p);
     const voices = Array.isArray(parsed?.voices) ? parsed.voices : [];
     const normalized = voices
         .map((v: VoiceEntry) => normalizeVoice(v))
@@ -64,6 +88,112 @@ function saveVoiceLibrary(lib: { voices: VoiceEntry[] }) {
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(p, JSON.stringify(lib, null, 2));
     return p;
+}
+
+function cloneDeep<T>(value: T): T {
+    try {
+        return JSON.parse(JSON.stringify(value));
+    } catch {
+        return value;
+    }
+}
+
+function normalizeIntentName(raw: string) {
+    return String(raw || "").toLowerCase().trim().replace(/\s+/g, "_").replace(/[^a-z0-9_]/g, "");
+}
+
+function loadIntentLibrary(): { intents: IntentLibraryEntry[] } {
+    const p = getIntentLibraryPath();
+    if (!fs.existsSync(p)) return { intents: [] };
+    const parsed = readJsonFileSafe(p);
+    const src = Array.isArray(parsed?.intents) ? parsed.intents : [];
+    const intents = src
+        .map((entry: any) => {
+            if (typeof entry === "string") {
+                const name = normalizeIntentName(entry);
+                if (!name || name === "general") return null;
+                return { name };
+            }
+            if (!entry || typeof entry !== "object") return null;
+            const name = normalizeIntentName(entry.name);
+            if (!name || name === "general") return null;
+            return {
+                name,
+                label: typeof entry.label === "string" ? entry.label : undefined,
+                workflow_template: entry.workflow_template
+            };
+        })
+        .filter((x: IntentLibraryEntry | null): x is IntentLibraryEntry => !!x);
+    return { intents };
+}
+
+function loadPromptLibraryEntries(): Array<{ suggested_key?: string; text?: string }> {
+    const candidates = [
+        getPromptLibraryPath(),
+        path.resolve(process.cwd(), '../shared_code/config/prompt_library.json'),
+    ];
+    for (const p of candidates) {
+        if (!fs.existsSync(p)) continue;
+        try {
+            const parsed = readJsonFileSafe(p);
+            const prompts = Array.isArray(parsed?.prompts) ? parsed.prompts : [];
+            return prompts;
+        } catch {
+            // try next candidate
+        }
+    }
+    return [];
+}
+
+function collectPromptKeysFromWorkflow(workflow: any): string[] {
+    const out = new Set<string>();
+    const nodes = Array.isArray(workflow?.nodes) ? workflow.nodes : [];
+    for (const node of nodes) {
+        const promptKey = String(node?.data?.promptKey || "").trim();
+        const promptKeyWithName = String(node?.data?.promptKeyWithName || "").trim();
+        if (promptKey) out.add(promptKey);
+        if (promptKeyWithName) out.add(promptKeyWithName);
+    }
+    return Array.from(out);
+}
+
+function defaultFirstResponseWorkflow() {
+    return {
+        nodes: [{ id: '1', position: { x: 250, y: 50 }, data: { label: 'Start First Response', promptKey: 'first_response_greeting' }, type: 'custom_input' }],
+        edges: []
+    };
+}
+
+function buildBootstrapDefaults(industry: string) {
+    const intentLib = loadIntentLibrary();
+    const promptEntries = loadPromptLibraryEntries();
+    const promptByKey: Record<string, string> = {};
+    for (const p of promptEntries) {
+        const key = String(p?.suggested_key || "").trim();
+        const text = String(p?.text || "").trim();
+        if (key && text && !promptByKey[key]) promptByKey[key] = text;
+    }
+
+    const workflows: Record<string, any> = {};
+    const intents = new Set<string>(["first_response"]);
+    const firstResponseTemplate = intentLib.intents.find((i) => i.name === "first_response")?.workflow_template;
+    workflows.first_response = firstResponseTemplate
+        ? cloneDeep(firstResponseTemplate)
+        : defaultFirstResponseWorkflow();
+
+    const prompts: Record<string, string> = { general: "..." };
+    const promptKeys = new Set<string>();
+    Object.values(workflows).forEach((wf) => collectPromptKeysFromWorkflow(wf).forEach((k) => promptKeys.add(k)));
+    for (const key of promptKeys) {
+        prompts[key] = promptByKey[key] || "...";
+    }
+
+    return {
+        industry,
+        intents: Array.from(intents),
+        prompts,
+        workflows
+    };
 }
 
 function upsertVoices(existing: VoiceEntry[], incoming: VoiceEntry[]) {
@@ -161,7 +291,7 @@ async function importElevenLabsVoices() {
                 }
                 if (!entry.isFile() || !entry.name.endsWith(".json")) continue;
                 try {
-                    const parsed = JSON.parse(fs.readFileSync(p, "utf-8"));
+                    const parsed = readJsonFileSafe(p);
                     const id = String(parsed?.elevenlabs_voice_id || "").trim();
                     if (id) ids.add(id);
                 } catch {
@@ -267,7 +397,7 @@ export async function GET(req: NextRequest) {
             }
             const p = getIndustryConfigPath(industry);
             if (fs.existsSync(p)) {
-                const content = JSON.parse(fs.readFileSync(p, 'utf-8'));
+                const content = readJsonFileSafe(p);
                 return NextResponse.json(content);
             }
             return NextResponse.json({}, { status: 404 });
@@ -278,7 +408,7 @@ export async function GET(req: NextRequest) {
 
             const p = getClientConfigPath(industry, client);
             if (fs.existsSync(p)) {
-                const content = JSON.parse(fs.readFileSync(p, 'utf-8'));
+                const content = readJsonFileSafe(p);
                 return NextResponse.json(content);
             }
             return NextResponse.json({}, { status: 404 });
@@ -290,7 +420,7 @@ export async function GET(req: NextRequest) {
             // Actually workflows might need it. Allow read.
             const p = getGlobalPromptsPath();
             if (fs.existsSync(p)) {
-                const content = JSON.parse(fs.readFileSync(p, 'utf-8'));
+                const content = readJsonFileSafe(p);
                 return NextResponse.json(content);
             }
             return NextResponse.json({});
@@ -302,7 +432,7 @@ export async function GET(req: NextRequest) {
             }
             const p = path.join(getConfigPath(), 'phone_mappings.json');
             if (fs.existsSync(p)) {
-                const content = JSON.parse(fs.readFileSync(p, 'utf-8'));
+                const content = readJsonFileSafe(p);
 
                 if (isSuperAdmin(user)) {
                     return NextResponse.json(content);
@@ -323,19 +453,47 @@ export async function GET(req: NextRequest) {
         if (type === 'prompt_library') {
             const p = path.join(getConfigPath(), 'prompt_library.json');
             if (fs.existsSync(p)) {
-                const content = JSON.parse(fs.readFileSync(p, 'utf-8'));
+                const content = readJsonFileSafe(p);
                 return NextResponse.json(content);
             }
             return NextResponse.json({ prompts: [] });
         }
 
+        if (type === 'intent_library') {
+            const p = path.join(getConfigPath(), 'intent_library.json');
+            if (fs.existsSync(p)) {
+                const content = readJsonFileSafe(p);
+                return NextResponse.json(content);
+            }
+            return NextResponse.json({ intents: [] });
+        }
+
         if (type === 'voice_library') {
             const p = path.join(getConfigPath(), 'voice_library.json');
             if (fs.existsSync(p)) {
-                const content = JSON.parse(fs.readFileSync(p, 'utf-8'));
+                const content = readJsonFileSafe(p);
                 return NextResponse.json(content);
             }
             return NextResponse.json({ voices: [] });
+        }
+
+        if (type === 'variants' && industry && client) {
+            if (!hasClientAccess(user, industry, client)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+            const dir = getVariantDir(industry, client);
+            if (!fs.existsSync(dir)) return NextResponse.json({ variants: [] });
+            const variants = fs.readdirSync(dir, { withFileTypes: true })
+                .filter((e) => e.isFile() && e.name.toLowerCase().endsWith('.json'))
+                .map((e) => {
+                    const p = path.join(dir, e.name);
+                    const stat = fs.statSync(p);
+                    return {
+                        name: e.name.replace(/\.json$/i, ''),
+                        file: e.name,
+                        updated_at: stat.mtime.toISOString(),
+                    };
+                })
+                .sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+            return NextResponse.json({ variants });
         }
 
         if (type === 'history' && industry && client) {
@@ -382,7 +540,7 @@ export async function POST(req: NextRequest) {
         console.log(`[API] POST action=${action} type=${type} industry=${industry} client=${client} user=${userLabel}`);
 
         // SAFEGUARD: Basic Validation
-        if (action !== 'create_industry' && action !== 'import_voices' && type !== 'phone_mappings' && type !== 'prompt_library' && type !== 'voice_library' && !industry) {
+        if (action !== 'create_industry' && action !== 'import_voices' && type !== 'phone_mappings' && type !== 'prompt_library' && type !== 'voice_library' && type !== 'intent_library' && !industry) {
             return NextResponse.json({ error: 'Industry is required' }, { status: 400 });
         }
 
@@ -393,13 +551,15 @@ export async function POST(req: NextRequest) {
                     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
                 }
                 if (!hasClientAccess(user, industry, client)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-            } else if (type === 'industry' || type === 'phone_mappings' || type === 'global_prompts' || type === 'prompt_library' || type === 'voice_library') {
+            } else if (type === 'industry' || type === 'phone_mappings' || type === 'global_prompts' || type === 'prompt_library' || type === 'voice_library' || type === 'intent_library') {
                 if (type === 'industry' && isSuperAdmin(user)) {
                     // admin only
                 } else if (type === 'phone_mappings' && (permissions.can_edit_phone_mappings || isSuperAdmin(user))) {
                     // allowed
                 } else if (type === 'prompt_library' && (permissions.can_manage_prompt_library || isSuperAdmin(user))) {
                     // allowed
+                } else if (type === 'intent_library' && (permissions.can_manage_prompt_library || isSuperAdmin(user))) {
+                    // allowed (reusing prompt-library management permission)
                 } else if (type === 'voice_library') {
                     // Admin-only (product requirement): do not allow non-admins even if permission flags are present.
                     if (user.role !== 'admin') return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
@@ -412,11 +572,19 @@ export async function POST(req: NextRequest) {
                     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
                 }
             }
-        } else {
+        } else if (action !== 'save_variant' && action !== 'load_variant') {
             // Create/Delete actions restricted to Admin usually, 
             // but maybe creating a client is allowed if you have access to that industry? 
             // Implementing strict admin-only for creat/delete for now as per plan
             if (user.role !== 'admin') return NextResponse.json({ error: 'Forbidden: Admin Only' }, { status: 403 });
+        }
+
+        if (action === 'save_variant' || action === 'load_variant') {
+            if (!industry || !client) return NextResponse.json({ error: 'Industry and client are required' }, { status: 400 });
+            if (!permissions.can_edit_clients && !isSuperAdmin(user)) {
+                return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+            }
+            if (!hasClientAccess(user, industry, client)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
         }
 
         if (action === 'save') {
@@ -431,6 +599,8 @@ export async function POST(req: NextRequest) {
                 targetPath = path.join(getConfigPath(), 'prompt_library.json');
             } else if (type === 'voice_library') {
                 targetPath = path.join(getConfigPath(), 'voice_library.json');
+            } else if (type === 'intent_library') {
+                targetPath = path.join(getConfigPath(), 'intent_library.json');
             } else {
                 return NextResponse.json({ error: 'Invalid parameters for save' }, { status: 400 });
             }
@@ -470,6 +640,38 @@ export async function POST(req: NextRequest) {
             }
 
             return NextResponse.json({ success: true });
+        }
+
+        if (action === 'save_variant') {
+            const variantName = String(body?.variantName || "").trim();
+            if (!variantName) return NextResponse.json({ error: 'variantName is required' }, { status: 400 });
+            const safeName = variantName.replace(/[<>:"/\\|?*\x00-\x1F]/g, "_");
+            const sourcePath = getClientConfigPath(industry, client);
+            if (!fs.existsSync(sourcePath)) return NextResponse.json({ error: 'Client configuration not found' }, { status: 404 });
+
+            const variantDir = getVariantDir(industry, client);
+            if (!fs.existsSync(variantDir)) fs.mkdirSync(variantDir, { recursive: true });
+            const targetPath = path.join(variantDir, `${safeName}.json`);
+            fs.copyFileSync(sourcePath, targetPath);
+
+            logAudit(user, 'save_variant', { industry, client, variantName: safeName, targetPath });
+            return NextResponse.json({ success: true, variant: safeName });
+        }
+
+        if (action === 'load_variant') {
+            const variantName = String(body?.variantName || "").trim();
+            if (!variantName) return NextResponse.json({ error: 'variantName is required' }, { status: 400 });
+            const safeName = variantName.replace(/[<>:"/\\|?*\x00-\x1F]/g, "_");
+            const sourcePath = path.join(getVariantDir(industry, client), `${safeName}.json`);
+            if (!fs.existsSync(sourcePath)) return NextResponse.json({ error: 'Variant not found' }, { status: 404 });
+
+            const targetPath = getClientConfigPath(industry, client);
+            const dir = path.dirname(targetPath);
+            if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+            fs.copyFileSync(sourcePath, targetPath);
+
+            logAudit(user, 'load_variant', { industry, client, variantName: safeName, sourcePath, targetPath });
+            return NextResponse.json({ success: true, variant: safeName });
         }
 
         if (action === 'import_voices') {
@@ -527,7 +729,7 @@ export async function POST(req: NextRequest) {
             if (fs.existsSync(dir)) return NextResponse.json({ error: 'Industry already exists' }, { status: 409 });
             fs.mkdirSync(dir, { recursive: true });
 
-            const initialDefaults = { industry: newName, intents: ["general"], prompts: { "general": "..." }, workflows: {} };
+            const initialDefaults = buildBootstrapDefaults(newName);
             fs.writeFileSync(defaultsPath, JSON.stringify(initialDefaults, null, 2));
             logAudit(user, 'create_industry', { industry: newName });
             return NextResponse.json({ success: true });
@@ -544,17 +746,39 @@ export async function POST(req: NextRequest) {
             try {
                 const defaultsPath = getIndustryConfigPath(industry);
                 if (fs.existsSync(defaultsPath)) {
-                    initialContent = JSON.parse(fs.readFileSync(defaultsPath, 'utf-8')) as Record<string, any>;
+                    initialContent = readJsonFileSafe(defaultsPath) as Record<string, any>;
                     initialContent.client_id = newName;
                 }
             } catch (e) { }
+
+            const bootstrap = buildBootstrapDefaults(industry);
+            const currentIntents = new Set<string>(Array.isArray(initialContent.intents) ? initialContent.intents : []);
+            currentIntents.delete("general");
+            if (!currentIntents.size) {
+                bootstrap.intents.forEach((i) => currentIntents.add(i));
+            }
+            if (!currentIntents.has("first_response")) currentIntents.add("first_response");
+            initialContent.intents = Array.from(currentIntents);
+
+            initialContent.workflows = { ...(bootstrap.workflows || {}), ...(initialContent.workflows || {}) };
+            if (!initialContent.workflows.first_response) {
+                initialContent.workflows.first_response = cloneDeep(bootstrap.workflows.first_response || defaultFirstResponseWorkflow());
+            }
+
+            const mergedPrompts = { ...(bootstrap.prompts || {}), ...(initialContent.prompts || {}) };
+            const keySet = new Set<string>();
+            Object.values(initialContent.workflows || {}).forEach((wf: any) => collectPromptKeysFromWorkflow(wf).forEach((k) => keySet.add(k)));
+            for (const key of keySet) {
+                if (!mergedPrompts[key]) mergedPrompts[key] = "...";
+            }
+            initialContent.prompts = mergedPrompts;
 
             // Set default voice from library if available
             let appliedDefaultVoice = false;
             try {
                 const voiceLibPath = path.join(getConfigPath(), 'voice_library.json');
                 if (fs.existsSync(voiceLibPath)) {
-                    const lib = JSON.parse(fs.readFileSync(voiceLibPath, 'utf-8'));
+                    const lib = readJsonFileSafe(voiceLibPath);
                     const defaults = (lib.voices || []).filter((v: any) => v.default);
                     const defaultVoice = defaults[0];
                     if (defaultVoice) {
@@ -582,7 +806,7 @@ export async function POST(req: NextRequest) {
                     ];
                     for (const p of twPaths) {
                         if (!fs.existsSync(p)) continue;
-                        const tw = JSON.parse(fs.readFileSync(p, 'utf-8'));
+                        const tw = readJsonFileSafe(p);
                         const voiceId = (tw?.elevenlabs_voice_id as string) || "";
                         if (voiceId) {
                             initialContent.tts_provider = "elevenlabs";
@@ -618,7 +842,7 @@ export async function POST(req: NextRequest) {
             }
 
             try {
-                const sourceContent = JSON.parse(fs.readFileSync(sourcePath, 'utf-8')) as Record<string, any>;
+                const sourceContent = readJsonFileSafe(sourcePath) as Record<string, any>;
                 const copied = { ...sourceContent, client_id: newName };
                 const dir = path.dirname(targetPath);
                 if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });

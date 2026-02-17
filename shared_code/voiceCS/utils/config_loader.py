@@ -27,14 +27,45 @@ def load_json(path):
         return json.load(f)
 
 
+def _resolve_industry_dir(industry):
+    if not industry:
+        return None
+    base = os.path.join(CONFIG_DIR, "industries")
+    exact = os.path.join(base, industry)
+    if os.path.isdir(exact):
+        return industry
+    lower = industry.lower()
+    lower_path = os.path.join(base, lower)
+    if os.path.isdir(lower_path):
+        return lower
+    if os.path.isdir(base):
+        for name in os.listdir(base):
+            if name.lower() == lower:
+                return name
+    return industry
+
+
 def load_industry_defaults(industry):
-    path = os.path.join(CONFIG_DIR, "industries", industry, "defaults.json")
+    resolved = _resolve_industry_dir(industry)
+    path = os.path.join(CONFIG_DIR, "industries", resolved, "defaults.json")
     return load_json(path)
 
 
 def load_client_config(industry, client_id):
-    path = os.path.join(CONFIG_DIR, "clients", industry, f"{client_id}.json")
-    return load_json(path)
+    resolved_industry = _resolve_industry_dir(industry)
+    path = os.path.join(CONFIG_DIR, "clients", resolved_industry, f"{client_id}.json")
+    if os.path.exists(path):
+        return load_json(path)
+    lower_path = os.path.join(CONFIG_DIR, "clients", resolved_industry, f"{client_id.lower()}.json")
+    if os.path.exists(lower_path):
+        return load_json(lower_path)
+    client_dir = os.path.join(CONFIG_DIR, "clients", resolved_industry)
+    if os.path.exists(client_dir):
+        for filename in os.listdir(client_dir):
+            if filename.lower() == f"{client_id.lower()}.json":
+                return load_json(os.path.join(client_dir, filename))
+    print(f"WARNING: Client config not found for {resolved_industry}/{client_id}")
+    return {"client_id": client_id, "industry": resolved_industry}
 
 
 

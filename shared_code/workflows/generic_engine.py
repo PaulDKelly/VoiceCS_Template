@@ -75,6 +75,8 @@ def handle_generic_workflow(session_id: str, text: str) -> dict:
     capture_var = current_node.get("data", {}).get("captureVariable")
     if capture_var and text:
         captured = text.strip()
+        # Normalize common spoken punctuation artifacts from STT (e.g. "Paul Kelly.")
+        captured = re.sub(r"[.!?,;:]+$", "", captured).strip()
         if capture_var == "customer_name":
             if _is_valid_name(captured):
                 session[capture_var] = captured
@@ -169,7 +171,27 @@ def _process_node(node_id: str, nodes: list, edges: list, session: dict, config:
         else:
             return {"prompt": "I've processed your request. Is there anything else? [HANGUP]", "session": session, "config": config}
 
-    # 2. Generate Prompt
+    # 3. Auto-skip placeholder start nodes (e.g. "Start knowledgebase") that have
+    # no prompt mapping. This prevents reading editor labels to callers.
+    data = node.get("data", {}) or {}
+    node_type = str(node.get("type") or "")
+    label = str(data.get("label") or "").strip()
+    prompt_key = data.get("promptKey")
+    prompt_key_with_name = data.get("promptKeyWithName")
+    if (
+        node_type in ("input", "custom_input")
+        and not prompt_key
+        and not prompt_key_with_name
+        and label.lower().startswith("start")
+    ):
+        outgoing = [e for e in edges if e["source"] == node_id]
+        if outgoing:
+            next_id = outgoing[0]["target"]
+            session["current_node_id"] = next_id
+            save_session(session_id, session)
+            return _process_node(next_id, nodes, edges, session, config, session_id)
+
+    # 4. Generate Prompt
     data = node.get("data", {}) or {}
     prompt_key = data.get("promptKey")
     prompt_key_with_name = data.get("promptKeyWithName")
@@ -220,18 +242,29 @@ def _process_node(node_id: str, nodes: list, edges: list, session: dict, config:
         if var_name == "caller_memory":
             return str(session.get("caller_memory") or "")
 
-        # Default: session first, then config
-        return str(
-            session.get(var_name)
-            or config.get(var_name)
-            or f"[{var_name}]"
-        )
+        # Default: session/config with dotted-path support (e.g. {db.phone})
+        resolved = _resolve_template_var(var_name, session, config)
+        if resolved is None:
+            return f"[{var_name}]"
+        return str(resolved)
 
-    prompt = re.sub(r"\{(\w+)\}", replace_var, prompt)
+    prompt = re.sub(r"\{([\w\.]+)\}", replace_var, prompt)
     # Clean up punctuation/spacing if {name} was empty
     prompt = re.sub(r",\s*([?.!])", r"\1", prompt)
     prompt = re.sub(r"\s+([?.!])", r"\1", prompt)
     prompt = re.sub(r"\s{2,}", " ", prompt).strip()
+
+    # Fail-safe: never return an empty prompt (prevents silent turns on call).
+    if not prompt:
+        prompt = "Could you say that again so I can help you with this?"
+
+    try:
+        print(
+            f"DEBUG: Generic node reply | intent={session.get('intent')} node_id={node_id} prompt_key={prompt_key} prompt_len={len(prompt)}",
+            flush=True,
+        )
+    except Exception:
+        pass
 
     return {"prompt": prompt, "session": session, "config": config}
 
@@ -370,6 +403,9 @@ def _execute_action(node: dict, session: dict, config: dict):
     elif action_type == 'database_query':
         return _execute_database_query(action_config, session, config)
 
+    elif action_type == 'knowledge_search':
+        return _execute_knowledge_search(action_config, session, config)
+
     elif action_type == 'update_session':
         updates = action_config.get("updates", {})
         for k, v in updates.items():
@@ -389,7 +425,8 @@ def _resolve_action_connection(action_config: dict, config: dict) -> tuple[dict,
     merged = dict(base)
     for field in [
         "type", "host", "port", "database", "username", "password", "password_env",
-        "connection_string", "sqlite_path"
+        "connection_string", "sqlite_path",
+        "supabase_url", "supabase_key", "supabase_key_env"
     ]:
         if action_config.get(field) not in (None, ""):
             merged[field] = action_config.get(field)
@@ -504,7 +541,7 @@ def _connect_db(conn_cfg: dict, db_type: str, timeout_seconds: float):
 def _execute_database_query(action_config: dict, session: dict, config: dict):
     conn_cfg, db_type = _resolve_action_connection(action_config, config)
     query_template = action_config.get("query_template") or action_config.get("query")
-    if not query_template:
+    if not query_template and db_type != "supabase_rest":
         print("WARN: Database query skipped (query_template missing).", flush=True)
         return None
 
@@ -514,6 +551,18 @@ def _execute_database_query(action_config: dict, session: dict, config: dict):
     result_var = action_config.get("result_var") or "db_result"
 
     try:
+        if db_type == "supabase_rest":
+            return _execute_supabase_rest_query(
+                action_config=action_config,
+                conn_cfg=conn_cfg,
+                session=session,
+                config=config,
+                max_rows=max_rows,
+                single_row=single_row,
+                result_var=result_var,
+                timeout_seconds=timeout_seconds,
+            )
+
         query, params = _build_query_and_params(query_template, db_type, session, config)
         conn, _ = _connect_db(conn_cfg, db_type, timeout_seconds)
         try:
@@ -542,4 +591,229 @@ def _execute_database_query(action_config: dict, session: dict, config: dict):
         print(f"ERROR: Database query action failed: {err_text}", flush=True)
         if action_config.get("error_prompt"):
             return {"prompt": action_config.get("error_prompt")}
+        return None
+
+def _resolve_template_var(var_name: str, session: dict, config: dict):
+    # Support dotted paths like {db.phone}
+    parts = str(var_name or "").split(".")
+    root = parts[0]
+    if root in session:
+        value = session.get(root)
+    elif root in config:
+        value = config.get(root)
+    else:
+        return None
+    for p in parts[1:]:
+        if isinstance(value, dict):
+            value = value.get(p)
+        else:
+            return None
+    return value
+
+
+def _replace_vars(template: str, session: dict, config: dict, url_encode: bool = False) -> str:
+    import urllib.parse
+
+    def _repl(match):
+        key = match.group(1)
+        value = _resolve_template_var(key, session, config)
+        if value is None:
+            value = ""
+        if isinstance(value, (dict, list)):
+            value = json.dumps(value)
+        value = str(value)
+        return urllib.parse.quote(value, safe="") if url_encode else value
+
+    return re.sub(r"\{([\w\.]+)\}", _repl, template or "")
+
+
+def _execute_supabase_rest_query(
+    action_config: dict,
+    conn_cfg: dict,
+    session: dict,
+    config: dict,
+    max_rows: int,
+    single_row: bool,
+    result_var: str,
+    timeout_seconds: float,
+):
+    import requests
+
+    endpoint_template = (
+        action_config.get("endpoint")
+        or action_config.get("query_template")
+        or action_config.get("query")
+        or ""
+    )
+    if not endpoint_template:
+        raise RuntimeError("Supabase REST requires endpoint (or query_template).")
+
+    base_url = (
+        conn_cfg.get("supabase_url")
+        or conn_cfg.get("host")
+        or conn_cfg.get("connection_string")
+        or ""
+    ).strip()
+    if not base_url:
+        raise RuntimeError("Supabase REST requires supabase_url on the connection.")
+
+    endpoint = _replace_vars(endpoint_template, session, config, url_encode=True)
+    if endpoint.startswith("http://") or endpoint.startswith("https://"):
+        url = endpoint
+    else:
+        url = f"{base_url.rstrip('/')}/{endpoint.lstrip('/')}"
+
+    key = conn_cfg.get("supabase_key") or conn_cfg.get("password")
+    if not key and conn_cfg.get("supabase_key_env"):
+        key = os.getenv(str(conn_cfg.get("supabase_key_env")))
+    if not key and conn_cfg.get("password_env"):
+        key = os.getenv(str(conn_cfg.get("password_env")))
+
+    headers = {"Accept": "application/json"}
+    if key:
+        headers["apikey"] = str(key)
+        headers["Authorization"] = f"Bearer {key}"
+
+    custom_headers = action_config.get("headers")
+    if isinstance(custom_headers, dict):
+        for k, v in custom_headers.items():
+            headers[str(k)] = str(v)
+
+    method = str(action_config.get("http_method") or action_config.get("method") or "GET").upper()
+    body = None
+    body_template = action_config.get("body_template")
+    if body_template:
+        rendered = _replace_vars(str(body_template), session, config, url_encode=False)
+        try:
+            body = json.loads(rendered)
+        except Exception:
+            body = {"raw": rendered}
+
+    res = requests.request(
+        method=method,
+        url=url,
+        headers=headers,
+        json=body if method in ("POST", "PUT", "PATCH", "DELETE") else None,
+        timeout=timeout_seconds,
+    )
+    if not res.ok:
+        raise RuntimeError(f"Supabase REST failed ({res.status_code}): {res.text[:400]}")
+
+    try:
+        payload = res.json()
+    except Exception:
+        payload = res.text
+
+    if isinstance(payload, list):
+        trimmed = payload[:max_rows]
+        session[result_var] = trimmed[0] if (single_row and trimmed) else (None if single_row else trimmed)
+    else:
+        session[result_var] = payload
+
+    print(f"DEBUG: Supabase REST query stored result in '{result_var}'", flush=True)
+    return None
+
+
+def _execute_knowledge_search(action_config: dict, session: dict, config: dict):
+    import requests
+
+    endpoint = str(action_config.get("endpoint") or "").strip()
+    index_name = str(action_config.get("index_name") or "").strip()
+    api_version = str(action_config.get("api_version") or "2023-11-01").strip()
+    query_template = str(action_config.get("query_template") or "{_last_user_input}").strip()
+    top_k = int(action_config.get("top_k") or 3)
+    timeout_seconds = float(action_config.get("timeout_seconds") or 6)
+
+    content_field = str(action_config.get("content_field") or "content").strip()
+    title_field = str(action_config.get("title_field") or "title").strip()
+    result_var = str(action_config.get("result_var") or "kb").strip()
+
+    no_results_prompt = action_config.get("no_results_prompt")
+    error_prompt = action_config.get("error_prompt")
+    respond_immediately = bool(action_config.get("respond_immediately"))
+
+    if not endpoint or not index_name:
+        err_text = "Knowledge search requires endpoint and index_name."
+        session[f"{result_var}_error"] = err_text
+        if error_prompt:
+            return {"prompt": error_prompt}
+        return None
+
+    api_key = action_config.get("api_key")
+    if not api_key and action_config.get("api_key_env"):
+        api_key = os.getenv(str(action_config.get("api_key_env")))
+
+    if not api_key:
+        err_text = "Knowledge search API key is missing (api_key or api_key_env)."
+        session[f"{result_var}_error"] = err_text
+        if error_prompt:
+            return {"prompt": error_prompt}
+        return None
+
+    query_text = _replace_vars(query_template, session, config, url_encode=False).strip()
+    if not query_text:
+        query_text = str(session.get("_last_user_input") or "").strip()
+
+    base = endpoint.rstrip("/")
+    url = f"{base}/indexes/{index_name}/docs/search?api-version={api_version}"
+    headers = {"Content-Type": "application/json", "api-key": str(api_key)}
+    payload = {
+        "search": query_text or "*",
+        "top": top_k,
+    }
+
+    try:
+        res = requests.post(url, headers=headers, json=payload, timeout=timeout_seconds)
+        if not res.ok:
+            raise RuntimeError(f"Knowledge search failed ({res.status_code}): {res.text[:400]}")
+
+        data = res.json()
+        docs = data.get("value") if isinstance(data, dict) else None
+        docs = docs if isinstance(docs, list) else []
+
+        hits = []
+        for d in docs:
+            if not isinstance(d, dict):
+                continue
+            title = d.get(title_field) or d.get("title") or d.get("name") or ""
+            content = d.get(content_field) or d.get("content") or d.get("text") or ""
+            score = d.get("@search.score")
+            hits.append({
+                "title": str(title or ""),
+                "content": str(content or ""),
+                "score": score,
+                "raw": d,
+            })
+
+        summary_lines = []
+        for h in hits:
+            if h["title"] and h["content"]:
+                summary_lines.append(f"{h['title']}: {h['content']}")
+            elif h["content"]:
+                summary_lines.append(h["content"])
+            elif h["title"]:
+                summary_lines.append(h["title"])
+
+        summary = " ".join([s.strip() for s in summary_lines if s.strip()][:top_k]).strip()
+
+        session[result_var] = {
+            "query": query_text,
+            "summary": summary,
+            "hits": hits,
+        }
+        print(f"DEBUG: Knowledge search stored result in '{result_var}' ({len(hits)} hits)", flush=True)
+
+        if not hits and no_results_prompt:
+            return {"prompt": str(no_results_prompt)}
+
+        if respond_immediately and summary:
+            return {"prompt": summary}
+
+        return None
+    except Exception as e:
+        err_text = f"{type(e).__name__}: {e}"
+        session[f"{result_var}_error"] = err_text
+        print(f"ERROR: Knowledge search action failed: {err_text}", flush=True)
+        if error_prompt:
+            return {"prompt": str(error_prompt)}
         return None

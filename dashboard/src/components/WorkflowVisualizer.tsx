@@ -115,6 +115,19 @@ export default function WorkflowVisualizer({ jsonContent, onChange, industryDefa
         startTop: number;
     } | null>(null);
 
+    const cloneWorkflow = (wf: any) => {
+        try {
+            return JSON.parse(JSON.stringify(wf));
+        } catch {
+            return wf;
+        }
+    };
+
+    const createFallbackWorkflow = (name: string) => ({
+        nodes: [{ id: '1', position: { x: 250, y: 50 }, data: { label: `Start ${name}` }, type: 'custom_input' }],
+        edges: []
+    });
+
     // Initial Load
     useEffect(() => {
         if (!selectedWorkflowKey && jsonContent.workflows) {
@@ -124,10 +137,10 @@ export default function WorkflowVisualizer({ jsonContent, onChange, industryDefa
                 const defaultIntent = jsonContent.default_intent;
                 if (defaultIntent && keys.includes(defaultIntent)) {
                     setSelectedWorkflowKey(defaultIntent);
-                } else if (keys.includes('general')) {
-                    setSelectedWorkflowKey('general');
+                } else if (keys.includes('first_response')) {
+                    setSelectedWorkflowKey('first_response');
                 } else {
-                    setSelectedWorkflowKey(keys[0]);
+                    setSelectedWorkflowKey(keys.find(k => k !== 'general') || keys[0]);
                 }
             }
         }
@@ -198,6 +211,34 @@ export default function WorkflowVisualizer({ jsonContent, onChange, industryDefa
             });
         }
     }, [jsonContent, onChange]);
+
+    // Keep workflows in sync with intents so new intents always get a workflow tab/canvas.
+    useEffect(() => {
+        const intents: string[] = (jsonContent.intents || []).filter((i: string) => i !== 'general');
+        if (!intents.length) return;
+
+        const workflows = jsonContent.workflows || {};
+        let changed = false;
+        const updatedWorkflows = { ...workflows };
+
+        intents.forEach((intent) => {
+            if (!updatedWorkflows[intent]) {
+                changed = true;
+                if (industryDefaults?.workflows?.[intent]) {
+                    updatedWorkflows[intent] = cloneWorkflow(industryDefaults.workflows[intent]);
+                } else {
+                    updatedWorkflows[intent] = createFallbackWorkflow(intent);
+                }
+            }
+        });
+
+        if (changed) {
+            onChange({
+                ...jsonContent,
+                workflows: updatedWorkflows
+            });
+        }
+    }, [jsonContent.intents, jsonContent.workflows, industryDefaults, onChange]);
 
     // Auto-Sync to Parent
     useEffect(() => {
@@ -504,6 +545,49 @@ export default function WorkflowVisualizer({ jsonContent, onChange, industryDefa
         setPromptError("Edit the text before saving a duplicate.");
     };
 
+    const countNodesUsingPromptKey = (key: string) => {
+        if (!key) return 0;
+        return nodes.filter((n: any) => n?.data?.promptKey === key || n?.data?.promptKeyWithName === key).length;
+    };
+
+    const clonePromptForSelectedNode = (field: "promptKey" | "promptKeyWithName") => {
+        if (!selectedNodeId) return;
+        const sourceKey = (selectedNode as any)?.data?.[field] || "";
+        if (!sourceKey) return;
+
+        const sourceText = jsonContent.prompts?.[sourceKey] || "";
+        const base = `${sourceKey}_${selectedNodeId}`.replace(/[^a-zA-Z0-9_]/g, "_");
+        let candidate = base;
+        let i = 1;
+        const all = new Set(Object.keys(jsonContent.prompts || {}));
+        while (all.has(candidate)) {
+            candidate = `${base}_${i}`;
+            i += 1;
+        }
+
+        const currentPrompts = jsonContent.prompts || {};
+        onChange({
+            ...jsonContent,
+            prompts: {
+                ...currentPrompts,
+                [candidate]: sourceText
+            }
+        });
+
+        setNodes((nds) =>
+            nds.map((node) => {
+                if (node.id !== selectedNodeId) return node;
+                return {
+                    ...node,
+                    data: {
+                        ...node.data,
+                        [field]: candidate
+                    }
+                };
+            })
+        );
+    };
+
     const handleActionChange = (field: string, value: any) => {
         setNodes((nds) =>
             nds.map((node) => {
@@ -619,10 +703,10 @@ export default function WorkflowVisualizer({ jsonContent, onChange, industryDefa
         setNewIntentName("");
     };
 
-    const contentWorkflows = jsonContent.workflows ? Object.keys(jsonContent.workflows) : [];
-    // Ensure first_response is always in the list if available in defaults
-    const defaultWorkflows = industryDefaults?.workflows ? Object.keys(industryDefaults.workflows) : [];
-    const workflowKeys = Array.from(new Set([...contentWorkflows, ...defaultWorkflows]));
+    const intentKeys = (jsonContent.intents || []).filter((k: string) => k !== 'general');
+    const contentWorkflows = jsonContent.workflows ? Object.keys(jsonContent.workflows).filter(k => k !== 'general') : [];
+    const defaultWorkflows = industryDefaults?.workflows ? Object.keys(industryDefaults.workflows).filter(k => k !== 'general') : [];
+    const workflowKeys = Array.from(new Set([...intentKeys, ...contentWorkflows, ...defaultWorkflows]));
     const promptKeysAll = jsonContent.prompts ? Object.keys(jsonContent.prompts) : [];
     const promptKeysByIntent = selectedWorkflowKey
         ? promptKeysAll.filter(k => k === selectedWorkflowKey || k.startsWith(`${selectedWorkflowKey}_`))
@@ -639,6 +723,8 @@ export default function WorkflowVisualizer({ jsonContent, onChange, industryDefa
         ...Array.from(usedPromptKeys).filter(k => promptKeysAll.includes(k))
     ]));
     const selectedNode = nodes.find(n => n.id === selectedNodeId);
+    const promptKeyUsageCount = selectedNode?.data?.promptKey ? countNodesUsingPromptKey(selectedNode.data.promptKey) : 0;
+    const promptKeyWithNameUsageCount = selectedNode?.data?.promptKeyWithName ? countNodesUsingPromptKey(selectedNode.data.promptKeyWithName) : 0;
 
     return (
         <div className="h-full w-full bg-gray-900 border border-gray-700 rounded relative flex flex-col">
@@ -698,7 +784,7 @@ export default function WorkflowVisualizer({ jsonContent, onChange, industryDefa
                                 <label className="block text-xs uppercase text-gray-400 font-bold mb-2">Available from Industry</label>
                                 <div className="flex flex-wrap gap-2">
                                     {industryDefaults.intents
-                                        .filter((i: string) => !workflowKeys.includes(i))
+                                        .filter((i: string) => i !== 'general' && !workflowKeys.includes(i))
                                         .map((i: string) => (
                                             <button
                                                 key={i}
@@ -789,7 +875,7 @@ export default function WorkflowVisualizer({ jsonContent, onChange, industryDefa
                 {/* Edit Panel (Node) */}
                 {selectedNode && nodePanelPos && (
                     <div
-                        className="absolute w-80 bg-gray-800 border-2 border-blue-500 rounded-lg shadow-xl p-4 z-20 flex flex-col gap-3"
+                        className="absolute w-96 max-h-[88vh] overflow-y-auto bg-gray-800 border-2 border-blue-500 rounded-lg shadow-xl p-4 z-20 flex flex-col gap-3"
                         style={{ left: nodePanelPos.x, top: nodePanelPos.y }}
                     >
                         <div
@@ -850,6 +936,7 @@ export default function WorkflowVisualizer({ jsonContent, onChange, industryDefa
                                         <option value="webhook">API Webhook</option>
                                         <option value="whisper">Whisper (Call Manager)</option>
                                         <option value="database_query">Database Query</option>
+                                        <option value="knowledge_search">Knowledge Search</option>
                                         <option value="detect_intent">Detect Intent</option>
                                     </select>
                                     {isLockedAction && (
@@ -918,7 +1005,7 @@ export default function WorkflowVisualizer({ jsonContent, onChange, industryDefa
                                 )}
 
                                 {selectedNode.data.actionType === 'database_query' && (
-                                    <div className="space-y-2">
+                                    <div className="space-y-2 max-h-[48vh] overflow-y-auto pr-1">
                                         <label className="text-[10px] text-gray-400 mb-1 block">Connection</label>
                                         <select
                                             className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs focus:border-blue-500 outline-none"
@@ -941,8 +1028,16 @@ export default function WorkflowVisualizer({ jsonContent, onChange, industryDefa
                                             <option value="mysql">MySQL</option>
                                             <option value="sqlserver">SQL Server</option>
                                             <option value="sqlite">SQLite</option>
+                                            <option value="supabase_rest">Supabase REST</option>
                                             <option value="custom">Custom</option>
                                         </select>
+                                        <input
+                                            type="text"
+                                            className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs"
+                                            placeholder="HTTP Method (for Supabase REST, default GET)"
+                                            value={selectedNode.data.actionConfig?.http_method || ""}
+                                            onChange={(e) => handleActionConfigChange("http_method", e.target.value)}
+                                        />
                                         <input
                                             type="text"
                                             className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs"
@@ -959,10 +1054,17 @@ export default function WorkflowVisualizer({ jsonContent, onChange, industryDefa
                                         />
                                         <textarea
                                             className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs"
-                                            placeholder="SQL query with variables, e.g. SELECT * FROM customers WHERE phone = {phone_number}"
+                                            placeholder="SQL query or Supabase endpoint path, e.g. /rest/v1/customers?phone=eq.{phone_number}&select=*"
                                             rows={4}
                                             value={selectedNode.data.actionConfig?.query_template || ""}
                                             onChange={(e) => handleActionConfigChange("query_template", e.target.value)}
+                                        />
+                                        <textarea
+                                            className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs"
+                                            placeholder='Body Template JSON (optional for POST/PATCH), e.g. {"postcode":"{postcode}"}'
+                                            rows={3}
+                                            value={selectedNode.data.actionConfig?.body_template || ""}
+                                            onChange={(e) => handleActionConfigChange("body_template", e.target.value)}
                                         />
                                         <input
                                             type="text"
@@ -996,6 +1098,115 @@ export default function WorkflowVisualizer({ jsonContent, onChange, industryDefa
                                             />
                                             Store single row only
                                         </label>
+                                        <input
+                                            type="text"
+                                            className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs"
+                                            placeholder="Error Prompt (optional)"
+                                            value={selectedNode.data.actionConfig?.error_prompt || ""}
+                                            onChange={(e) => handleActionConfigChange("error_prompt", e.target.value)}
+                                        />
+                                    </div>
+                                )}
+
+                                {selectedNode.data.actionType === 'knowledge_search' && (
+                                    <div className="space-y-2 max-h-[48vh] overflow-y-auto pr-1">
+                                        <input
+                                            type="text"
+                                            className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs"
+                                            placeholder="Search Endpoint, e.g. https://<service>.search.windows.net"
+                                            value={selectedNode.data.actionConfig?.endpoint || ""}
+                                            onChange={(e) => handleActionConfigChange("endpoint", e.target.value)}
+                                        />
+                                        <input
+                                            type="text"
+                                            className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs"
+                                            placeholder="Index Name"
+                                            value={selectedNode.data.actionConfig?.index_name || ""}
+                                            onChange={(e) => handleActionConfigChange("index_name", e.target.value)}
+                                        />
+                                        <input
+                                            type="text"
+                                            className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs"
+                                            placeholder="API Version (default 2023-11-01)"
+                                            value={selectedNode.data.actionConfig?.api_version || ""}
+                                            onChange={(e) => handleActionConfigChange("api_version", e.target.value)}
+                                        />
+                                        <input
+                                            type="text"
+                                            className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs"
+                                            placeholder="API Key Env Var (recommended), e.g. AZURE_SEARCH_API_KEY"
+                                            value={selectedNode.data.actionConfig?.api_key_env || ""}
+                                            onChange={(e) => handleActionConfigChange("api_key_env", e.target.value)}
+                                        />
+                                        <input
+                                            type="text"
+                                            className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs"
+                                            placeholder="API Key (optional, avoid for production)"
+                                            value={selectedNode.data.actionConfig?.api_key || ""}
+                                            onChange={(e) => handleActionConfigChange("api_key", e.target.value)}
+                                        />
+                                        <textarea
+                                            className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs"
+                                            placeholder="Query Template, e.g. {engineer_name} contact details"
+                                            rows={3}
+                                            value={selectedNode.data.actionConfig?.query_template || ""}
+                                            onChange={(e) => handleActionConfigChange("query_template", e.target.value)}
+                                        />
+                                        <div className="grid grid-cols-2 gap-2">
+                                            <input
+                                                type="number"
+                                                className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs"
+                                                placeholder="Top K (default 3)"
+                                                value={selectedNode.data.actionConfig?.top_k ?? ""}
+                                                onChange={(e) => handleActionConfigChange("top_k", e.target.value === "" ? "" : parseInt(e.target.value, 10) || 3)}
+                                            />
+                                            <input
+                                                type="number"
+                                                className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs"
+                                                placeholder="Timeout sec (default 6)"
+                                                value={selectedNode.data.actionConfig?.timeout_seconds ?? ""}
+                                                onChange={(e) => handleActionConfigChange("timeout_seconds", e.target.value === "" ? "" : parseFloat(e.target.value) || 6)}
+                                            />
+                                        </div>
+                                        <div className="grid grid-cols-2 gap-2">
+                                            <input
+                                                type="text"
+                                                className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs"
+                                                placeholder="Content Field (default content)"
+                                                value={selectedNode.data.actionConfig?.content_field || ""}
+                                                onChange={(e) => handleActionConfigChange("content_field", e.target.value)}
+                                            />
+                                            <input
+                                                type="text"
+                                                className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs"
+                                                placeholder="Title Field (default title)"
+                                                value={selectedNode.data.actionConfig?.title_field || ""}
+                                                onChange={(e) => handleActionConfigChange("title_field", e.target.value)}
+                                            />
+                                        </div>
+                                        <input
+                                            type="text"
+                                            className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs"
+                                            placeholder="Result Variable (default: kb)"
+                                            value={selectedNode.data.actionConfig?.result_var || ""}
+                                            onChange={(e) => handleActionConfigChange("result_var", e.target.value)}
+                                        />
+                                        <label className="text-[10px] text-gray-300 flex items-center gap-2">
+                                            <input
+                                                type="checkbox"
+                                                checked={!!selectedNode.data.actionConfig?.respond_immediately}
+                                                onChange={(e) => handleActionConfigChange("respond_immediately", e.target.checked)}
+                                                className="accent-blue-500"
+                                            />
+                                            Respond immediately with retrieved summary
+                                        </label>
+                                        <input
+                                            type="text"
+                                            className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs"
+                                            placeholder="No Results Prompt (optional)"
+                                            value={selectedNode.data.actionConfig?.no_results_prompt || ""}
+                                            onChange={(e) => handleActionConfigChange("no_results_prompt", e.target.value)}
+                                        />
                                         <input
                                             type="text"
                                             className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs"
@@ -1134,6 +1345,17 @@ export default function WorkflowVisualizer({ jsonContent, onChange, industryDefa
 
                             {selectedNode.data.promptKey && (
                                 <>
+                                    {promptKeyUsageCount > 1 && (
+                                        <div className="mb-2 p-2 rounded bg-yellow-900/30 border border-yellow-700 text-[10px] text-yellow-300">
+                                            This prompt key is shared by {promptKeyUsageCount} nodes. Editing it in Prompts tab updates all of them.
+                                            <button
+                                                onClick={() => clonePromptForSelectedNode("promptKey")}
+                                                className="ml-2 px-2 py-0.5 rounded bg-yellow-700 hover:bg-yellow-600 text-white"
+                                            >
+                                                Clone For This Node
+                                            </button>
+                                        </div>
+                                    )}
                                     <textarea
                                         className="w-full h-24 bg-gray-900 border border-gray-600 rounded p-2 text-xs text-gray-400 font-mono resize-none outline-none"
                                         value={jsonContent.prompts?.[selectedNode.data.promptKey] || ""}
@@ -1141,12 +1363,25 @@ export default function WorkflowVisualizer({ jsonContent, onChange, industryDefa
                                         readOnly
                                     />
                                     {selectedNode.data.promptKeyWithName && (
-                                        <textarea
-                                            className="w-full h-24 bg-gray-900 border border-gray-600 rounded p-2 text-xs text-gray-400 font-mono resize-none outline-none mt-2"
-                                            value={jsonContent.prompts?.[selectedNode.data.promptKeyWithName] || ""}
-                                            placeholder="Prompt text when name is known..."
-                                            readOnly
-                                        />
+                                        <>
+                                            {promptKeyWithNameUsageCount > 1 && (
+                                                <div className="mb-2 mt-2 p-2 rounded bg-yellow-900/30 border border-yellow-700 text-[10px] text-yellow-300">
+                                                    Name-known prompt key is shared by {promptKeyWithNameUsageCount} nodes.
+                                                    <button
+                                                        onClick={() => clonePromptForSelectedNode("promptKeyWithName")}
+                                                        className="ml-2 px-2 py-0.5 rounded bg-yellow-700 hover:bg-yellow-600 text-white"
+                                                    >
+                                                        Clone For This Node
+                                                    </button>
+                                                </div>
+                                            )}
+                                            <textarea
+                                                className="w-full h-24 bg-gray-900 border border-gray-600 rounded p-2 text-xs text-gray-400 font-mono resize-none outline-none mt-2"
+                                                value={jsonContent.prompts?.[selectedNode.data.promptKeyWithName] || ""}
+                                                placeholder="Prompt text when name is known..."
+                                                readOnly
+                                            />
+                                        </>
                                     )}
                                     <div className="text-[10px] text-gray-500 mt-1">
                                         Prompts are edited in the Prompts tab to keep them reusable.

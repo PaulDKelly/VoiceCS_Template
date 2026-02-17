@@ -30,6 +30,7 @@ export default function Home() {
 
   const [editorContent, setEditorContent] = useState<string>("");
   const [message, setMessage] = useState<string>("");
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const [modalOpen, setModalOpen] = useState(false);
   const [modalType, setModalType] = useState<"create_industry" | "create_client" | "copy_client" | null>(null);
@@ -106,6 +107,7 @@ export default function Home() {
     setSelectedIndustry(industry);
     setSelectedClient(client || null);
     setIsLoadingConfig(true);
+    setLoadError(null);
 
     const query = new URLSearchParams({ type, industry });
     if (client) query.set("client", client);
@@ -138,12 +140,24 @@ export default function Home() {
     }
 
     const json = await res.json();
+    if (!res.ok) {
+      const err = json?.error || `Failed to load config (${res.status})`;
+      setLoadError(String(err));
+      setMessage(`Error: ${String(err)}`);
+      setIsLoadingConfig(false);
+      return;
+    }
+
     setEditorContent(JSON.stringify(json, null, 2));
     setMessage("");
     setIsLoadingConfig(false);
   }
 
   async function saveConfig() {
+    if (loadError) {
+      setMessage(`Error: cannot save because latest load failed (${loadError})`);
+      return;
+    }
     if (!canSave) {
       setMessage("Read-only: you do not have permission to save.");
       return;
@@ -215,6 +229,65 @@ export default function Home() {
       console.error('[SAVE DEBUG] Exception:', e);
       setMessage("Invalid JSON");
     }
+  }
+
+  async function saveVariant() {
+    if (!selectedIndustry || !selectedClient || selectedType !== "client") return;
+    const variantName = prompt("Variant name");
+    if (!variantName) return;
+
+    const res = await fetch("/api/config", {
+      method: "POST",
+      body: JSON.stringify({
+        action: "save_variant",
+        industry: selectedIndustry,
+        client: selectedClient,
+        variantName,
+      }),
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({} as any));
+      setMessage(`Error: ${err?.error || "Failed to save variant"}`);
+      return;
+    }
+    setMessage(`Variant saved: ${variantName}`);
+  }
+
+  async function loadVariant() {
+    if (!selectedIndustry || !selectedClient || selectedType !== "client") return;
+
+    const listRes = await fetch(`/api/config?type=variants&industry=${encodeURIComponent(selectedIndustry)}&client=${encodeURIComponent(selectedClient)}&_t=${Date.now()}`, {
+      cache: "no-store",
+    });
+    const listJson = await listRes.json().catch(() => ({} as any));
+    const variants = Array.isArray(listJson?.variants) ? listJson.variants : [];
+    if (!variants.length) {
+      setMessage("No saved variants for this client");
+      return;
+    }
+
+    const names = variants.map((v: any) => v.name);
+    const choice = prompt(`Enter variant name to load:\n${names.join("\n")}`, names[0]);
+    if (!choice) return;
+
+    const res = await fetch("/api/config", {
+      method: "POST",
+      body: JSON.stringify({
+        action: "load_variant",
+        industry: selectedIndustry,
+        client: selectedClient,
+        variantName: choice,
+      }),
+    });
+
+    const json = await res.json().catch(() => ({} as any));
+    if (!res.ok) {
+      setMessage(`Error: ${json?.error || "Failed to load variant"}`);
+      return;
+    }
+    await loadConfig("client", selectedIndustry, selectedClient);
+    setMessage(`Variant loaded: ${choice}`);
   }
 
   // --- Modal / Action Handlers ---
@@ -319,6 +392,7 @@ export default function Home() {
   const canEditIndustries = isSuperAdmin;
   const canManageUsers = isSuperAdmin || permissions.can_manage_users;
   const canManagePromptLibrary = isSuperAdmin || permissions.can_manage_prompt_library;
+  const canManageIntentLibrary = isSuperAdmin || permissions.can_manage_prompt_library;
   // Voice library modifications are Admin-only (per product requirement), regardless of per-user flags.
   const canManageVoiceLibrary = user.role === "admin" && (isSuperAdmin || permissions.can_manage_voice_library);
   const canViewHistory = isSuperAdmin || permissions.can_view_history;
@@ -525,6 +599,22 @@ export default function Home() {
                     <History size={16} /> {showHistory ? "Hide History" : "History"}
                   </button>
                 )}
+                {selectedType === 'client' && canSave && (
+                  <button
+                    onClick={saveVariant}
+                    className="flex items-center gap-2 px-3 py-2 text-sm rounded font-medium transition border border-gray-600 text-gray-300 hover:text-white"
+                  >
+                    Save Variant
+                  </button>
+                )}
+                {selectedType === 'client' && canSave && (
+                  <button
+                    onClick={loadVariant}
+                    className="flex items-center gap-2 px-3 py-2 text-sm rounded font-medium transition border border-gray-600 text-gray-300 hover:text-white"
+                  >
+                    Load Variant
+                  </button>
+                )}
                 <button
                   onClick={saveConfig}
                   disabled={!canSave}
@@ -577,6 +667,7 @@ export default function Home() {
                     ([_, val]) => val.client_id?.trim().toLowerCase() === selectedClient?.trim().toLowerCase() && val.industry?.trim().toLowerCase() === selectedIndustry?.trim().toLowerCase()
                   )?.[0]}
                   canManageVoiceLibrary={canManageVoiceLibrary}
+                  canManageIntentLibrary={canManageIntentLibrary}
                 />
               )}
 

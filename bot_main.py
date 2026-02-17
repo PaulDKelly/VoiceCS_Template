@@ -176,6 +176,8 @@ async def twilio_voice_handler(req: Request) -> Response:
     # Phone Number Routing Logic
     client_id = os.getenv("CLIENT_ID")
     industry = os.getenv("INDUSTRY")
+    mapping_found = False
+    candidate_used = None
 
     try:
         from shared_code.utils.config_loader import load_phone_mappings
@@ -204,11 +206,12 @@ async def twilio_voice_handler(req: Request) -> Response:
     except Exception as e:
         logger.error(f"Failed to load phone mappings: {e}")
 
-    # If no mapping found and no defaults in env vars, return generic message
-    if not mapping_found and not client_id:
-        logger.warning(f"Unrecognized number {called_number} and no default CLIENT_ID set. Rejecting.")
+    # If no mapping found, reject unless explicitly allowed
+    allow_unmapped = str(os.getenv("ALLOW_UNMAPPED_CALLS", "")).lower() in ("1", "true", "yes")
+    if not mapping_found and not allow_unmapped:
+        logger.warning(f"Unrecognized number {called_number}. Rejecting (no mapping).")
         response = VoiceResponse()
-        response.say("I'm sorry, this phone number is not recognized by our system. Please contact support for assistance. Goodbye.", voice="Polly.Amy")
+        response.say("I'm sorry, this phone number is not currently routed. Please contact support for assistance. Goodbye.", voice="Polly.Amy")
         response.hangup()
         return Response(text=str(response), content_type='application/xml')
 
@@ -224,6 +227,7 @@ async def twilio_voice_handler(req: Request) -> Response:
     connect = Connect()
     stream = Stream(url=ws_url_with_params)
     stream.parameter(name="phone_number", value=caller_number)
+    stream.parameter(name="called_number", value=called_number)
     stream.parameter(name="client_id", value=client_id)
     stream.parameter(name="industry", value=industry)
     connect.append(stream)

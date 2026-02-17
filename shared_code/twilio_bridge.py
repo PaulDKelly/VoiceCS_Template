@@ -281,6 +281,15 @@ class TwilioBridge:
             return
 
         reply_text = response.get("prompt")
+        if isinstance(reply_text, str):
+            reply_text = reply_text.strip()
+        if not reply_text:
+            logger.warning(
+                "Agent returned empty prompt (session=%s, text=%r). Sending fallback prompt.",
+                self.session_id,
+                text,
+            )
+            reply_text = "Sorry, I didn't catch that. Could you repeat that for me?"
         
         # Check for Hangup Signal
         should_hangup = False

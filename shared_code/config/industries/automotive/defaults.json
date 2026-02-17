@@ -64,26 +64,12 @@
           "type": "input",
           "data": {
             "label": "Greeting & Name",
-            "promptKey": "first_response_greeting"
+            "promptKey": "first_response_greeting",
+            "captureVariable": "customer_name"
           },
           "position": {
             "x": 250,
             "y": 0
-          }
-        },
-        {
-          "id": "fr2",
-          "type": "action",
-          "data": {
-            "label": "Extract Name",
-            "actionType": "extract_name",
-            "actionConfig": {
-              "target": "customer_name"
-            }
-          },
-          "position": {
-            "x": 250,
-            "y": 100
           }
         },
         {
@@ -95,7 +81,7 @@
           },
           "position": {
             "x": 250,
-            "y": 200
+            "y": 100
           }
         },
         {
@@ -107,19 +93,14 @@
           },
           "position": {
             "x": 250,
-            "y": 300
+            "y": 200
           }
         }
       ],
       "edges": [
         {
-          "id": "efr1-2",
+          "id": "efr1-3",
           "source": "fr1",
-          "target": "fr2"
-        },
-        {
-          "id": "efr2-3",
-          "source": "fr2",
           "target": "fr3"
         },
         {

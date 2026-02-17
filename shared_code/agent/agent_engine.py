@@ -32,6 +32,26 @@ def run_agent_step(session_id: str, text: str) -> dict:
     # 3. Route to active workflow
     previous_intent = session.get("intent")
     result = route_to_workflow(previous_intent, session_id, text)
+
+    # Update caller memory (best-effort)
+    try:
+        phone_number = session.get("phone_number")
+        enable_caller_memory = bool(config.get("enable_caller_memory", False))
+        if enable_caller_memory and phone_number:
+            from shared_code.utils.caller_memory import load_caller_memory, save_caller_memory
+            memory = load_caller_memory(phone_number)
+            if session.get("customer_name"):
+                memory["name"] = session.get("customer_name")
+            if session.get("intent"):
+                memory["last_intent"] = session.get("intent")
+            if text and text != "__start__":
+                memory["last_utterance"] = text.strip()[:200]
+            save_caller_memory(phone_number, memory)
+        elif phone_number:
+            # If disabled, ensure any previous memory note doesn't linger in session
+            session.pop("caller_memory", None)
+    except Exception:
+        pass
     
     # 4. Check for immediate handoff (Intent Switch within the result)
     # The engines might have updated the session intent.
@@ -83,7 +103,13 @@ def _extract_name_smartly(text: str) -> str:
         return None
         
     cleaned = response.strip().replace(".", "")
-    if len(cleaned) < 2 or cleaned.lower() in ["hello", "hi", "hey", "nothing", "none"]:
+    banned = {
+        "hello", "hi", "hey", "nothing", "none",
+        "there", "here", "someone", "anyone", "unknown",
+        "yes", "yeah", "yep", "okay", "ok", "sure",
+        "mate", "buddy", "pal", "friend", "sir", "madam"
+    }
+    if len(cleaned) < 2 or cleaned.lower() in banned:
         return None
         
     return cleaned

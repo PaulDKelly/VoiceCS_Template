@@ -14,14 +14,10 @@ def route_to_workflow(intent: str, session_id: str, text: str) -> dict:
         config = load_merged_config(session.get("client_id"), session.get("industry"))
         custom_workflow = config.get("workflows", {}).get(intent)
         if custom_workflow:
-            # Always allow designer control for first_response and sales
-            if intent in ["first_response", "sales"]:
+            # Dashboard-created workflows are expected to run automatically.
+            # Keep an explicit opt-out switch for legacy clients that need hardcoded engines.
+            if custom_workflow.get("use_generic_engine") is not False:
                 print(f"DEBUG: Found custom workflow for intent '{intent}'. Routing to generic_engine.", flush=True)
-                return handle_generic_workflow(session_id, text)
-
-            # For other intents, require explicit opt-in to generic engine
-            if custom_workflow.get("use_generic_engine"):
-                print(f"DEBUG: Found custom workflow for intent '{intent}' (opt-in). Routing to generic_engine.", flush=True)
                 return handle_generic_workflow(session_id, text)
     except Exception as e:
         print(f"DEBUG: Error checking for custom workflow: {e}", flush=True)

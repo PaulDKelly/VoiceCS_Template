@@ -17,6 +17,8 @@
         "can_view_phone_mappings": true,
         "can_edit_phone_mappings": true,
         "can_manage_users": true,
+        "can_manage_prompt_library": true,
+        "can_manage_voice_library": true,
         "can_view_history": true,
         "can_revert_history": true
       },
@@ -37,6 +39,8 @@
         "can_view_phone_mappings": false,
         "can_edit_phone_mappings": false,
         "can_manage_users": false,
+        "can_manage_prompt_library": false,
+        "can_manage_voice_library": false,
         "can_view_history": true,
         "can_revert_history": false
       },
@@ -58,6 +62,8 @@
         "can_view_phone_mappings": false,
         "can_edit_phone_mappings": false,
         "can_manage_users": false,
+        "can_manage_prompt_library": false,
+        "can_manage_voice_library": false,
         "can_view_history": true,
         "can_revert_history": false
       }

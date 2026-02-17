@@ -53,6 +53,9 @@ type ClientConfig = {
         password_env?: string;
         connection_string?: string;
         sqlite_path?: string;
+        supabase_url?: string;
+        supabase_key?: string;
+        supabase_key_env?: string;
     }>;
     [key: string]: any;
 };
@@ -62,6 +65,7 @@ type Props = {
     onChange: (newJson: any) => void;
     assignedPhoneNumber?: string;
     canManageVoiceLibrary?: boolean;
+    canManageIntentLibrary?: boolean;
 };
 
 type VoiceEntry = {
@@ -72,7 +76,13 @@ type VoiceEntry = {
     default: boolean;
 };
 
-export default function ClientConfigForm({ jsonContent, onChange, assignedPhoneNumber, canManageVoiceLibrary }: Props) {
+type IntentEntry = {
+    name: string;
+    label?: string;
+    workflow_template?: any;
+};
+
+export default function ClientConfigForm({ jsonContent, onChange, assignedPhoneNumber, canManageVoiceLibrary, canManageIntentLibrary }: Props) {
     const [config, setConfig] = useState<ClientConfig>(jsonContent);
     const [industryDefaults, setIndustryDefaults] = useState<any>(null);
     const [ttsTestStatus, setTtsTestStatus] = useState<"idle" | "loading" | "playing">("idle");
@@ -83,6 +93,14 @@ export default function ClientConfigForm({ jsonContent, onChange, assignedPhoneN
     const [whisperTestError, setWhisperTestError] = useState<string | null>(null);
     const [voiceLibrary, setVoiceLibrary] = useState<VoiceEntry[]>([]);
     const [voiceLibraryError, setVoiceLibraryError] = useState<string | null>(null);
+    const [intentLibrary, setIntentLibrary] = useState<IntentEntry[]>([]);
+    const [intentLibraryError, setIntentLibraryError] = useState<string | null>(null);
+    const [selectedLibraryIntent, setSelectedLibraryIntent] = useState<string>("");
+    const [newIntentName, setNewIntentName] = useState<string>("");
+    const [newIntentLabel, setNewIntentLabel] = useState<string>("");
+    const autoMigratedFirstResponseRef = useRef(false);
+    const [dbTestStatus, setDbTestStatus] = useState<Record<string, "idle" | "loading" | "ok" | "error">>({});
+    const [dbTestMessage, setDbTestMessage] = useState<Record<string, string>>({});
     const [importingProvider, setImportingProvider] = useState<"" | "azure_gb" | "elevenlabs">("");
     const [newVoice, setNewVoice] = useState<VoiceEntry>({
         name: "",
@@ -219,6 +237,99 @@ export default function ClientConfigForm({ jsonContent, onChange, assignedPhoneN
         load();
     }, []);
 
+    const normalizeIntentLibrary = (raw: any): IntentEntry[] => {
+        const source = Array.isArray(raw?.intents) ? raw.intents : [];
+        return source
+            .map((entry: any) => {
+                if (typeof entry === "string") {
+                    const name = entry.trim();
+                    if (name === "general") return null;
+                    return { name, label: name };
+                }
+                if (entry && typeof entry === "object") {
+                    const name = String(entry.name || "").trim();
+                    if (!name || name === "general") return null;
+                    return {
+                        name,
+                        label: String(entry.label || "").trim() || name,
+                        workflow_template: entry.workflow_template
+                    };
+                }
+                return null;
+            })
+            .filter((x: IntentEntry | null): x is IntentEntry => !!x);
+    };
+
+    const toIntentLabel = (name: string): string =>
+        name
+            .replace(/_/g, " ")
+            .replace(/\b\w/g, (m) => m.toUpperCase());
+
+    const mergeKnownIntents = (base: IntentEntry[]): IntentEntry[] => {
+        const known = new Set<string>();
+        (config.intents || []).forEach((i) => { if (i !== "general") known.add(i); });
+        Object.keys(config.workflows || {}).forEach((i) => { if (i !== "general") known.add(i); });
+        (industryDefaults?.intents || []).forEach((i: string) => { if (i !== "general") known.add(i); });
+        Object.keys(industryDefaults?.workflows || {}).forEach((i) => { if (i !== "general") known.add(i); });
+
+        const map = new Map<string, IntentEntry>();
+        base.forEach((entry) => map.set(entry.name, entry));
+        Array.from(known).forEach((name) => {
+            const intentName = normalizeIntentName(String(name));
+            if (!intentName) return;
+            if (!map.has(intentName)) {
+                map.set(intentName, {
+                    name: intentName,
+                    label: toIntentLabel(intentName),
+                    workflow_template: industryDefaults?.workflows?.[intentName]
+                });
+            }
+        });
+        return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
+    };
+
+    const loadIntentLibrary = async () => {
+        try {
+            setIntentLibraryError(null);
+            const res = await fetch(`/api/config?type=intent_library&_t=${Date.now()}`);
+            const data = await res.json().catch(() => null);
+            if (!res.ok) {
+                const msg = (data && typeof data.error === "string" && data.error) ? data.error : `HTTP ${res.status}`;
+                setIntentLibraryError(`Failed to load intent library: ${msg}`);
+                setIntentLibrary([]);
+                return;
+            }
+            setIntentLibrary(mergeKnownIntents(normalizeIntentLibrary(data)));
+        } catch (err) {
+            console.error("Failed to load intent library", err);
+            setIntentLibraryError("Failed to load intent library");
+            setIntentLibrary(mergeKnownIntents([]));
+        }
+    };
+
+    const saveIntentLibrary = async (nextIntents: IntentEntry[]) => {
+        const res = await fetch("/api/config", {
+            method: "POST",
+            body: JSON.stringify({ action: "save", type: "intent_library", content: { intents: nextIntents } })
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => null);
+            setIntentLibraryError(err?.error || "Failed to save intent library.");
+            return false;
+        }
+        setIntentLibrary(nextIntents);
+        setIntentLibraryError(null);
+        return true;
+    };
+
+    useEffect(() => {
+        loadIntentLibrary();
+    }, []);
+
+    useEffect(() => {
+        setIntentLibrary((prev) => mergeKnownIntents(prev));
+    }, [industryDefaults, config.intents, config.workflows]);
+
 
     const handleChange = (field: string, value: any) => {
         const newConfig = { ...config, [field]: value };
@@ -252,6 +363,100 @@ export default function ClientConfigForm({ jsonContent, onChange, assignedPhoneN
         if (legacyFlag === false) return false;
         return true;
     };
+
+    const normalizeIntentName = (raw: string): string =>
+        raw.toLowerCase().trim().replace(/\s+/g, "_").replace(/[^a-z0-9_]/g, "");
+
+    const cloneTemplate = (value: any) => {
+        if (value === undefined || value === null) return undefined;
+        try {
+            return JSON.parse(JSON.stringify(value));
+        } catch {
+            return value;
+        }
+    };
+
+    const collectPromptKeysFromWorkflow = (workflow: any): string[] => {
+        const out = new Set<string>();
+        const nodes = Array.isArray(workflow?.nodes) ? workflow.nodes : [];
+        nodes.forEach((node: any) => {
+            const k1 = String(node?.data?.promptKey || "").trim();
+            const k2 = String(node?.data?.promptKeyWithName || "").trim();
+            if (k1) out.add(k1);
+            if (k2) out.add(k2);
+        });
+        return Array.from(out);
+    };
+
+    const isFallbackFirstResponse = (workflow: any) => {
+        const nodes = Array.isArray(workflow?.nodes) ? workflow.nodes : [];
+        const edges = Array.isArray(workflow?.edges) ? workflow.edges : [];
+        if (nodes.length !== 1 || edges.length !== 0) return false;
+        const label = String(nodes[0]?.data?.label || "").toLowerCase();
+        return label.includes("start first response");
+    };
+
+    const addIntentToClient = (rawIntent: string, workflowTemplate?: any) => {
+        const intentName = normalizeIntentName(rawIntent);
+        if (!intentName) {
+            alert("Please enter a valid intent name.");
+            return false;
+        }
+        if (intentName === "general") {
+            alert('The "general" workflow intent is disabled. Keep general prompts in Prompt Library.');
+            return false;
+        }
+        if (config.intents?.includes(intentName)) {
+            alert(`Intent "${intentName}" already exists.`);
+            return false;
+        }
+
+        const nextConfig = { ...config };
+        nextConfig.intents = [...(config.intents || []), intentName];
+
+        const nextRules = { ...(config.intent_routing_rules || {}) };
+        nextRules[intentName] = { keywords: [], enabled: true };
+        nextConfig.intent_routing_rules = nextRules;
+
+        const nextWorkflows = { ...(config.workflows || {}) };
+        if (!nextWorkflows[intentName]) {
+            nextWorkflows[intentName] = createWorkflowTemplate(intentName, workflowTemplate);
+        }
+        nextConfig.workflows = nextWorkflows;
+
+        const intentPrompts = mergePromptsFromIndustry(intentName);
+        if (Object.keys(intentPrompts).length > 0) {
+            nextConfig.prompts = { ...(config.prompts || {}), ...intentPrompts };
+        }
+
+        setConfig(nextConfig);
+        onChange(nextConfig);
+        return true;
+    };
+
+    useEffect(() => {
+        if (autoMigratedFirstResponseRef.current) return;
+        const frLibrary = intentLibrary.find((entry) => entry.name === "first_response" && !!entry.workflow_template);
+        if (!frLibrary?.workflow_template) return;
+        const existing = config?.workflows?.first_response;
+        if (!existing || !isFallbackFirstResponse(existing)) return;
+
+        const nextConfig = { ...config };
+        nextConfig.workflows = { ...(config.workflows || {}), first_response: cloneTemplate(frLibrary.workflow_template) };
+
+        const nextPrompts = { ...(config.prompts || {}) };
+        const templatePromptKeys = collectPromptKeysFromWorkflow(frLibrary.workflow_template);
+        templatePromptKeys.forEach((key) => {
+            if (!nextPrompts[key]) {
+                nextPrompts[key] = industryDefaults?.prompts?.[key] || "...";
+            }
+        });
+        nextConfig.prompts = nextPrompts;
+
+        autoMigratedFirstResponseRef.current = true;
+        setConfig(nextConfig);
+        onChange(nextConfig);
+    }, [intentLibrary, config, industryDefaults, onChange]);
 
     const runTtsTest = async () => {
         setTtsTestError(null);
@@ -337,12 +542,40 @@ export default function ClientConfigForm({ jsonContent, onChange, assignedPhoneN
         }
     };
 
+    const runDatabaseConnectionTest = async (connKey: string, conn: any) => {
+        setDbTestStatus((prev) => ({ ...prev, [connKey]: "loading" }));
+        setDbTestMessage((prev) => ({ ...prev, [connKey]: "" }));
+        try {
+            const res = await fetch("/api/database/test", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ connection: conn }),
+            });
+            const data = await res.json().catch(() => null);
+            if (!res.ok || !data?.ok) {
+                setDbTestStatus((prev) => ({ ...prev, [connKey]: "error" }));
+                setDbTestMessage((prev) => ({ ...prev, [connKey]: data?.error || "Connection test failed." }));
+                return;
+            }
+            setDbTestStatus((prev) => ({ ...prev, [connKey]: "ok" }));
+            setDbTestMessage((prev) => ({ ...prev, [connKey]: data?.message || "Connection successful." }));
+        } catch (err: any) {
+            setDbTestStatus((prev) => ({ ...prev, [connKey]: "error" }));
+            setDbTestMessage((prev) => ({ ...prev, [connKey]: err?.message || "Connection test failed." }));
+        }
+    };
+
     // Helper: Create a workflow template from industry defaults or basic fallback
-    const createWorkflowTemplate = (intent: string) => {
+    const createWorkflowTemplate = (intent: string, preferredTemplate?: any) => {
+        if (preferredTemplate) {
+            console.log(`[Using intent library template for ${intent}]`);
+            return cloneTemplate(preferredTemplate);
+        }
+
         // Try to get from industry defaults first
         if (industryDefaults?.workflows?.[intent]) {
             console.log(`[Using industry template for ${intent}]`);
-            return industryDefaults.workflows[intent];
+            return cloneTemplate(industryDefaults.workflows[intent]);
         }
 
         // Fallback to basic template
@@ -377,6 +610,8 @@ export default function ClientConfigForm({ jsonContent, onChange, assignedPhoneN
 
         return intentPrompts;
     };
+
+    const visibleIntents = (config.intents || []).filter((intent) => intent !== "general");
 
     return (
         <div className="h-full overflow-y-auto bg-gray-900 p-6">
@@ -887,17 +1122,27 @@ export default function ClientConfigForm({ jsonContent, onChange, assignedPhoneN
                             <div key={`db-conn-${connKey}`} className="p-4 bg-gray-900 rounded border border-gray-700">
                                 <div className="flex items-center justify-between mb-3">
                                     <div className="text-sm font-semibold text-white">{connKey}</div>
-                                    <button
-                                        type="button"
-                                        onClick={() => {
-                                            const next = { ...(config.database_connections || {}) };
-                                            delete next[connKey];
-                                            handleChange("database_connections", next);
-                                        }}
-                                        className="text-xs px-2 py-1 rounded bg-red-800 hover:bg-red-700 text-white"
-                                    >
-                                        Remove
-                                    </button>
+                                    <div className="flex items-center gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={() => runDatabaseConnectionTest(connKey, conn)}
+                                            disabled={dbTestStatus[connKey] === "loading"}
+                                            className="text-xs px-2 py-1 rounded bg-emerald-700 hover:bg-emerald-600 text-white disabled:opacity-50"
+                                        >
+                                            {dbTestStatus[connKey] === "loading" ? "Testing..." : "Test Connection"}
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                const next = { ...(config.database_connections || {}) };
+                                                delete next[connKey];
+                                                handleChange("database_connections", next);
+                                            }}
+                                            className="text-xs px-2 py-1 rounded bg-red-800 hover:bg-red-700 text-white"
+                                        >
+                                            Remove
+                                        </button>
+                                    </div>
                                 </div>
                                 <div className="grid grid-cols-2 gap-3">
                                     <div>
@@ -917,9 +1162,64 @@ export default function ClientConfigForm({ jsonContent, onChange, assignedPhoneN
                                             <option value="mysql">MySQL</option>
                                             <option value="sqlserver">SQL Server</option>
                                             <option value="sqlite">SQLite</option>
+                                            <option value="supabase_rest">Supabase REST</option>
                                             <option value="custom">Custom</option>
                                         </select>
                                     </div>
+                                    {conn.type === "supabase_rest" && (
+                                        <div>
+                                            <label className="block text-xs text-gray-400 mb-1">Supabase URL</label>
+                                            <input
+                                                type="text"
+                                                value={conn.supabase_url || ""}
+                                                onChange={(e) => {
+                                                    const next = {
+                                                        ...(config.database_connections || {}),
+                                                        [connKey]: { ...(conn || {}), supabase_url: e.target.value }
+                                                    };
+                                                    handleChange("database_connections", next);
+                                                }}
+                                                className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-white text-sm"
+                                                placeholder="https://<project-ref>.supabase.co"
+                                            />
+                                        </div>
+                                    )}
+                                    {conn.type === "supabase_rest" && (
+                                        <div>
+                                            <label className="block text-xs text-gray-400 mb-1">Supabase Key</label>
+                                            <input
+                                                type="password"
+                                                value={conn.supabase_key || ""}
+                                                onChange={(e) => {
+                                                    const next = {
+                                                        ...(config.database_connections || {}),
+                                                        [connKey]: { ...(conn || {}), supabase_key: e.target.value }
+                                                    };
+                                                    handleChange("database_connections", next);
+                                                }}
+                                                className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-white text-sm"
+                                                placeholder="Prefer service role key"
+                                            />
+                                        </div>
+                                    )}
+                                    {conn.type === "supabase_rest" && (
+                                        <div className="col-span-2">
+                                            <label className="block text-xs text-gray-400 mb-1">Supabase Key Env Var</label>
+                                            <input
+                                                type="text"
+                                                value={conn.supabase_key_env || ""}
+                                                onChange={(e) => {
+                                                    const next = {
+                                                        ...(config.database_connections || {}),
+                                                        [connKey]: { ...(conn || {}), supabase_key_env: e.target.value }
+                                                    };
+                                                    handleChange("database_connections", next);
+                                                }}
+                                                className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-white text-sm"
+                                                placeholder="Recommended (e.g. SUPABASE_SERVICE_ROLE_KEY)"
+                                            />
+                                        </div>
+                                    )}
                                     <div>
                                         <label className="block text-xs text-gray-400 mb-1">Connection String</label>
                                         <input
@@ -1045,6 +1345,12 @@ export default function ClientConfigForm({ jsonContent, onChange, assignedPhoneN
                                         />
                                     </div>
                                 </div>
+                                {dbTestStatus[connKey] === "ok" && dbTestMessage[connKey] && (
+                                    <p className="text-xs text-green-400 mt-3">{dbTestMessage[connKey]}</p>
+                                )}
+                                {dbTestStatus[connKey] === "error" && dbTestMessage[connKey] && (
+                                    <p className="text-xs text-red-400 mt-3">{dbTestMessage[connKey]}</p>
+                                )}
                             </div>
                         ))}
                         <div>
@@ -1079,7 +1385,7 @@ export default function ClientConfigForm({ jsonContent, onChange, assignedPhoneN
                     </p>
 
                     <div className="space-y-6">
-                        {config.intents?.map((intent) => {
+                        {visibleIntents.map((intent) => {
                             const behavior = (config.workflow_behavior || {})[intent] || {
                                 question_mode: "single_turn",
                                 max_follow_ups: 0
@@ -1211,7 +1517,7 @@ export default function ClientConfigForm({ jsonContent, onChange, assignedPhoneN
                         Configure how the agent detects customer intents. Add keywords that trigger each workflow.
                     </p>
 
-                    {config.intents?.map((intent) => {
+                    {visibleIntents.map((intent) => {
                         const rules = config.intent_routing_rules || {};
                         const intentRule = rules[intent] || { keywords: [], enabled: true };
                         const isEnabled = intentRule.enabled !== false;
@@ -1276,46 +1582,234 @@ export default function ClientConfigForm({ jsonContent, onChange, assignedPhoneN
                         );
                     })}
 
-                    <button
-                        onClick={() => {
-                            const newIntent = prompt("Enter new intent name (e.g., sales, support):");
-                            if (newIntent && newIntent.trim()) {
-                                const intentName = newIntent.toLowerCase().trim();
-                                if (!config.intents?.includes(intentName)) {
-                                    // Add to intents list
-                                    handleChange("intents", [...(config.intents || []), intentName]);
+                    <div className="space-y-3">
+                        <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-2">
+                            <select
+                                value={selectedLibraryIntent}
+                                onChange={(e) => setSelectedLibraryIntent(e.target.value)}
+                                className="bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500"
+                            >
+                                <option value="">Select intent from library...</option>
+                                {intentLibrary
+                                    .filter((entry) => !(config.intents || []).includes(entry.name))
+                                    .map((entry) => (
+                                        <option key={entry.name} value={entry.name}>
+                                            {entry.label || entry.name} ({entry.name})
+                                        </option>
+                                    ))}
+                            </select>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    if (!selectedLibraryIntent) return;
+                                    const selectedEntry = intentLibrary.find((entry) => entry.name === selectedLibraryIntent);
+                                    const ok = addIntentToClient(selectedLibraryIntent, selectedEntry?.workflow_template);
+                                    if (ok) {
+                                        setSelectedLibraryIntent("");
+                                        alert(`Intent "${selectedLibraryIntent}" added with starter workflow. Click Save at the top.`);
+                                    }
+                                }}
+                                className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded text-sm font-medium"
+                            >
+                                Add From Library
+                            </button>
+                        </div>
 
-                                    // Add to routing rules
-                                    const newRules = { ...(config.intent_routing_rules || {}) };
-                                    newRules[intentName] = { keywords: [], enabled: true };
-                                    handleChange("intent_routing_rules", newRules);
-
-                                    // Auto-create workflow template
-                                    const newWorkflows = { ...(config.workflows || {}) };
-                                    if (!newWorkflows[intentName]) {
-                                        newWorkflows[intentName] = createWorkflowTemplate(intentName);
-                                        handleChange("workflows", newWorkflows);
-                                        console.log(`[Auto-created workflow for new intent: ${intentName}]`);
-
-                                        // Also merge prompts from industry defaults
-                                        const intentPrompts = mergePromptsFromIndustry(intentName);
-                                        if (Object.keys(intentPrompts).length > 0) {
-                                            const newPrompts = { ...(config.prompts || {}), ...intentPrompts };
-                                            handleChange("prompts", newPrompts);
-                                            console.log(`[Merged ${Object.keys(intentPrompts).length} prompts for ${intentName}]`);
+                        <div className="grid grid-cols-1 md:grid-cols-[1fr_1fr_auto] gap-2">
+                            <input
+                                type="text"
+                                value={newIntentName}
+                                onChange={(e) => setNewIntentName(e.target.value)}
+                                className="bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500"
+                                placeholder="New intent id (e.g., address_lookup)"
+                            />
+                            <input
+                                type="text"
+                                value={newIntentLabel}
+                                onChange={(e) => setNewIntentLabel(e.target.value)}
+                                className="bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500"
+                                placeholder="Label (optional)"
+                            />
+                            <button
+                                type="button"
+                                onClick={async () => {
+                                    const normalizedName = normalizeIntentName(newIntentName);
+                                    const currentTemplate = config.workflows?.[normalizedName] || industryDefaults?.workflows?.[normalizedName];
+                                    const ok = addIntentToClient(newIntentName, currentTemplate);
+                                    if (!ok) return;
+                                    if (canManageIntentLibrary) {
+                                        const exists = intentLibrary.some((entry) => entry.name === normalizedName);
+                                        if (!exists) {
+                                            const nextIntents = intentLibrary.concat({
+                                                name: normalizedName,
+                                                label: newIntentLabel.trim() || normalizedName,
+                                                workflow_template: cloneTemplate(currentTemplate)
+                                            });
+                                            await saveIntentLibrary(nextIntents);
                                         }
                                     }
+                                    setNewIntentName("");
+                                    setNewIntentLabel("");
+                                    alert(`Intent "${normalizedName}" added with starter workflow. Click Save at the top.`);
+                                }}
+                                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-sm font-medium"
+                            >
+                                Add Custom Intent
+                            </button>
+                        </div>
 
-                                    alert(`Intent "${intentName}" added with starter workflow! Don't forget to click Save at the top.`);
-                                } else {
-                                    alert(`Intent "${intentName}" already exists.`);
-                                }
-                            }
-                        }}
-                        className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded text-sm font-medium"
-                    >
-                        + Add Intent
-                    </button>
+                        {intentLibraryError && (
+                            <div className="text-xs text-red-400">{intentLibraryError}</div>
+                        )}
+
+                        {canManageIntentLibrary && (
+                            <div className="mt-2 border-t border-gray-700 pt-3">
+                                <h4 className="text-sm font-semibold text-purple-300 mb-2">Manage Intent Library (Admin)</h4>
+                                <p className="text-xs text-gray-400 mb-3">
+                                    Save workflow templates here so "Add From Library" creates full node flows.
+                                </p>
+                                <div className="flex gap-2 mb-3">
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            const next = intentLibrary.map((entry) => {
+                                                const source = config.workflows?.[entry.name];
+                                                if (!source) return entry;
+                                                return { ...entry, workflow_template: cloneTemplate(source) };
+                                            });
+                                            setIntentLibrary(next);
+                                        }}
+                                        className="px-3 py-1 rounded text-xs bg-emerald-700 hover:bg-emerald-600 text-white"
+                                    >
+                                        Capture All From Current Client
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            const next = intentLibrary.map((entry) => {
+                                                if (entry.workflow_template) return entry;
+                                                const source = industryDefaults?.workflows?.[entry.name];
+                                                if (!source) return entry;
+                                                return { ...entry, workflow_template: cloneTemplate(source) };
+                                            });
+                                            setIntentLibrary(next);
+                                        }}
+                                        className="px-3 py-1 rounded text-xs bg-indigo-700 hover:bg-indigo-600 text-white"
+                                    >
+                                        Fill Missing From Industry
+                                    </button>
+                                </div>
+                                <div className="space-y-2 mb-3">
+                                    {intentLibrary.map((entry, idx) => (
+                                        <div key={`${entry.name}-${idx}`} className="p-2 border border-gray-700 rounded bg-gray-900/30">
+                                            <div className="grid grid-cols-12 gap-2 items-center mb-2">
+                                                <div className="col-span-4 text-xs text-gray-300">{entry.name}</div>
+                                                <div className="col-span-4">
+                                                    <input
+                                                        type="text"
+                                                        value={entry.label || ""}
+                                                        onChange={(e) => {
+                                                            const next = [...intentLibrary];
+                                                            next[idx] = { ...next[idx], label: e.target.value };
+                                                            setIntentLibrary(next);
+                                                        }}
+                                                        className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs"
+                                                        placeholder="Display label"
+                                                    />
+                                                </div>
+                                                <div className="col-span-3 text-[11px] text-gray-400">
+                                                    {entry.workflow_template ? "Template: Yes" : "Template: No"}
+                                                </div>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setIntentLibrary(intentLibrary.filter((_, i) => i !== idx))}
+                                                    className="col-span-1 px-2 py-1 rounded text-xs bg-red-800 hover:bg-red-700 text-white"
+                                                >
+                                                    Delete
+                                                </button>
+                                            </div>
+
+                                            <div className="flex gap-2 mb-2">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                        const source = config.workflows?.[entry.name];
+                                                        if (!source) {
+                                                            alert(`No current client workflow found for "${entry.name}".`);
+                                                            return;
+                                                        }
+                                                        const next = [...intentLibrary];
+                                                        next[idx] = { ...next[idx], workflow_template: cloneTemplate(source) };
+                                                        setIntentLibrary(next);
+                                                    }}
+                                                    className="px-2 py-1 rounded text-xs bg-emerald-700 hover:bg-emerald-600 text-white"
+                                                >
+                                                    Capture Current Workflow
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                        const source = industryDefaults?.workflows?.[entry.name];
+                                                        if (!source) {
+                                                            alert(`No industry workflow found for "${entry.name}".`);
+                                                            return;
+                                                        }
+                                                        const next = [...intentLibrary];
+                                                        next[idx] = { ...next[idx], workflow_template: cloneTemplate(source) };
+                                                        setIntentLibrary(next);
+                                                    }}
+                                                    className="px-2 py-1 rounded text-xs bg-indigo-700 hover:bg-indigo-600 text-white"
+                                                >
+                                                    Use Industry Template
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                        const next = [...intentLibrary];
+                                                        next[idx] = { ...next[idx], workflow_template: undefined };
+                                                        setIntentLibrary(next);
+                                                    }}
+                                                    className="px-2 py-1 rounded text-xs bg-gray-700 hover:bg-gray-600 text-white"
+                                                >
+                                                    Clear Template
+                                                </button>
+                                            </div>
+
+                                            <textarea
+                                                key={`intent-template-${entry.name}-${idx}`}
+                                                defaultValue={entry.workflow_template ? JSON.stringify(entry.workflow_template, null, 2) : ""}
+                                                onBlur={(e) => {
+                                                    const raw = e.target.value.trim();
+                                                    const next = [...intentLibrary];
+                                                    if (!raw) {
+                                                        next[idx] = { ...next[idx], workflow_template: undefined };
+                                                        setIntentLibrary(next);
+                                                        return;
+                                                    }
+                                                    try {
+                                                        const parsed = JSON.parse(raw);
+                                                        next[idx] = { ...next[idx], workflow_template: parsed };
+                                                        setIntentLibrary(next);
+                                                    } catch {
+                                                        alert(`Invalid JSON for template "${entry.name}".`);
+                                                    }
+                                                }}
+                                                className="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1 text-white text-[11px] min-h-[80px]"
+                                                placeholder="Workflow template JSON (optional)"
+                                            />
+                                        </div>
+                                    ))}
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={async () => { await saveIntentLibrary(intentLibrary); }}
+                                    className="px-3 py-1 rounded text-xs bg-blue-700 hover:bg-blue-600 text-white"
+                                >
+                                    Save Intent Library
+                                </button>
+                            </div>
+                        )}
+                    </div>
                 </section>
 
                 {/* Info Note */}

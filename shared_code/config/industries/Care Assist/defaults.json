@@ -7,7 +7,7 @@
   "prompts": {
     "first_response_greeting": "Hi, I'm {assistant} with {brand}. Before we get into the details, can I take your name?",
     "first_response_ask_intent": "How can I help you today, {name}?",
-    "intent_not_recognized": "Sorry, I’m not able to help with that. Is there anything else I can assist you with?"
+    "intent_not_recognized": "Sorry, I'm not able to help with that. Is there anything else I can assist you with?",
     "ask_intent_retry_giveup": "How can I help you today?",
     "ask_name_retry": "Sorry, I didn't catch your name. Could you say it again?",
     "intent_fallback": "Sorry, I didn't quite catch that. How can I help you today?"
@@ -20,26 +20,12 @@
           "type": "input",
           "data": {
             "label": "Greeting & Name",
-            "promptKey": "first_response_greeting"
+            "promptKey": "first_response_greeting",
+            "captureVariable": "customer_name"
           },
           "position": {
             "x": 250,
             "y": 0
-          }
-        },
-        {
-          "id": "fr2",
-          "type": "action",
-          "data": {
-            "label": "Extract Name",
-            "actionType": "extract_name",
-            "actionConfig": {
-              "target": "customer_name"
-            }
-          },
-          "position": {
-            "x": 250,
-            "y": 100
           }
         },
         {
@@ -51,7 +37,7 @@
           },
           "position": {
             "x": 250,
-            "y": 200
+            "y": 100
           }
         },
         {
@@ -63,19 +49,14 @@
           },
           "position": {
             "x": 250,
-            "y": 300
+            "y": 200
           }
         }
       ],
       "edges": [
         {
-          "id": "efr1-2",
+          "id": "efr1-3",
           "source": "fr1",
-          "target": "fr2"
-        },
-        {
-          "id": "efr2-3",
-          "source": "fr2",
           "target": "fr3"
         },
         {
