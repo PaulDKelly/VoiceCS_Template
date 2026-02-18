@@ -6,10 +6,18 @@ import base64
 import audioop
 import websockets
 import time
+import re
 import azure.cognitiveservices.speech as speechsdk
 from shared_code.agent.agent_engine import run_agent_step
 
 logger = logging.getLogger("twilio-bridge")
+
+
+def _is_valid_azure_region(value: str) -> bool:
+    region = str(value or "").strip().lower()
+    if not region:
+        return False
+    return re.fullmatch(r"[a-z0-9-]{2,32}", region) is not None
 
 class TwilioBridge:
     def __init__(self, speech_key: str, speech_region: str, elevenlabs_api_key: str, voice_id: str = "21m00Tcm4TlvDq8ikWAM"):
@@ -67,6 +75,8 @@ class TwilioBridge:
         # Since this is an adapter, we check if it has the attribute
         query_client_id = getattr(websocket, "query_params", {}).get("client_id")
         query_industry = getattr(websocket, "query_params", {}).get("industry")
+        query_test_workflow = getattr(websocket, "query_params", {}).get("test_workflow")
+        query_test_mode = getattr(websocket, "query_params", {}).get("test_mode")
 
         try:
             async for message in websocket.iter_text():
@@ -93,6 +103,8 @@ class TwilioBridge:
                     called_number = custom_params.get("called_number")
                     client_id = custom_params.get("client_id") or query_client_id
                     industry = custom_params.get("industry") or query_industry
+                    test_workflow = custom_params.get("test_workflow") or query_test_workflow
+                    test_mode = custom_params.get("test_mode") or query_test_mode
                     
                     if from_number:
                          # Strip 'client:' prefix if testing from browser
@@ -137,6 +149,8 @@ class TwilioBridge:
                         session["client_id"] = client_id
                     if industry:
                         session["industry"] = industry
+                    if test_mode:
+                        session["test_mode"] = str(test_mode)
 
                     # Load config for this client (used for caller memory + voice)
                     config = None
@@ -155,10 +169,17 @@ class TwilioBridge:
                                 self.azure_voice_name = azure_voice_name
                                 logger.info(f"Using Azure voice for client {client_id}: {self.azure_voice_name}")
 
-                            azure_region = config.get("azure_speech_region")
+                            azure_region = str(config.get("azure_speech_region") or "").strip()
                             if azure_region:
-                                self.azure_speech_region = azure_region
-                                logger.info(f"Using Azure speech region for client {client_id}: {self.azure_speech_region}")
+                                if _is_valid_azure_region(azure_region):
+                                    self.azure_speech_region = azure_region
+                                    logger.info(f"Using Azure speech region for client {client_id}: {self.azure_speech_region}")
+                                else:
+                                    logger.warning(
+                                        f"Invalid azure_speech_region '{azure_region}' for client {client_id}; "
+                                        f"falling back to default region '{self.speech_region}'."
+                                    )
+                                    self.azure_speech_region = self.speech_region
 
                             azure_lang = config.get("azure_ssml_lang")
                             if azure_lang:
@@ -178,6 +199,19 @@ class TwilioBridge:
                                 self.voice_id = client_voice_id
                         except Exception as e:
                             logger.error(f"Failed to load client config for voice override: {e}")
+
+                    # Optional test workflow override for outbound test calls.
+                    # This forces the call to begin in the selected workflow.
+                    if test_workflow and config:
+                        workflow_key = str(test_workflow).strip()
+                        if config.get("workflows", {}).get(workflow_key):
+                            session["intent"] = workflow_key
+                            session["current_node_id"] = None
+                            logger.info(f"Test workflow override active: intent={workflow_key}")
+                        else:
+                            logger.warning(
+                                f"Test workflow override '{workflow_key}' not found for client={client_id}, industry={industry}"
+                            )
 
                     # Barge-in threshold (ms). 0 = disabled
                     try:
@@ -206,7 +240,10 @@ class TwilioBridge:
                         session.pop("customer_name", None)
                         
                     save_session(self.session_id, session)
-                    logger.info(f"Captured Session Context: Phone={from_number}, Client={client_id}, Industry={industry}")
+                    logger.info(
+                        f"Captured Session Context: Phone={from_number}, Client={client_id}, "
+                        f"Industry={industry}, TestWorkflow={test_workflow}"
+                    )
 
                     # Warm Azure TTS cache for common prompts to reduce latency
                     if self.tts_provider in ("azure", "azure_neural", "azure_tts"):

@@ -70,6 +70,11 @@ export default function Home() {
   const [resetEmail, setResetEmail] = useState("");
   const [resetMessage, setResetMessage] = useState("");
   const [availableAuthProviders, setAvailableAuthProviders] = useState<string[]>([]);
+  const [testCallOpen, setTestCallOpen] = useState(false);
+  const [testCallTo, setTestCallTo] = useState("");
+  const [testCallFrom, setTestCallFrom] = useState("");
+  const [testCallWebhookBaseUrl, setTestCallWebhookBaseUrl] = useState("");
+  const [isStartingTestCall, setIsStartingTestCall] = useState(false);
 
   useEffect(() => {
     if (status === "authenticated") {
@@ -468,6 +473,15 @@ export default function Home() {
     return Array.from(new Set<string>(base));
   })();
   const filteredWorkflowKeys = workflowKeys.filter((k) => k.toLowerCase().includes(workflowFilter.trim().toLowerCase()));
+  const selectedClientMappedNumber = (() => {
+    if (!selectedIndustry || !selectedClient) return "";
+    const found = Object.entries(phoneMappings).find(
+      ([, val]) =>
+        val.client_id?.trim().toLowerCase() === selectedClient.trim().toLowerCase() &&
+        val.industry?.trim().toLowerCase() === selectedIndustry.trim().toLowerCase()
+    );
+    return found?.[0] || "";
+  })();
   const pickerQuery = pickerClientSearch.trim().toLowerCase();
   const visibleClients = (list
     ? Object.entries(list.clients).flatMap(([industry, clients]) =>
@@ -501,6 +515,21 @@ export default function Home() {
     setPickerClientKey(selectedIndustry && selectedClient ? `${selectedIndustry}::${selectedClient}` : "");
     setPickerClientSearch("");
   }, [selectedIndustry, selectedClient]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      setTestCallTo(localStorage.getItem("dashboard:testCallTo") || "");
+      setTestCallWebhookBaseUrl(localStorage.getItem("dashboard:testCallWebhookBaseUrl") || "");
+    } catch {
+      // Ignore localStorage failures.
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!selectedClientMappedNumber) return;
+    setTestCallFrom(selectedClientMappedNumber);
+  }, [selectedClientMappedNumber]);
 
   useEffect(() => {
     if (!list || !session || initialConfigLoaded) return;
@@ -544,6 +573,53 @@ export default function Home() {
   const toggleSection = (section: "context" | "workflows" | "picker") => {
     setCollapsedSections((prev) => ({ ...prev, [section]: !prev[section] }));
   };
+
+  async function startTestCall() {
+    if (!selectedIndustry || !selectedClient || selectedType !== "client") {
+      setMessage("Error: Select a client config before starting a test call.");
+      return;
+    }
+    if (!testCallTo.trim() || !testCallFrom.trim() || !testCallWebhookBaseUrl.trim()) {
+      setMessage("Error: Test call requires To, From, and Voice Webhook URL.");
+      return;
+    }
+
+    setIsStartingTestCall(true);
+    try {
+      const res = await fetch("/api/calls/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          to: testCallTo.trim(),
+          from: testCallFrom.trim(),
+          webhookBaseUrl: testCallWebhookBaseUrl.trim(),
+          industry: selectedIndustry,
+          client: selectedClient,
+          workflow: selectedWorkflowKey || "first_response"
+        })
+      });
+      const json: { error?: string; sid?: string } = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setMessage(`Error: ${json?.error || "Failed to start test call"}`);
+        return;
+      }
+
+      try {
+        localStorage.setItem("dashboard:testCallTo", testCallTo.trim());
+        localStorage.setItem("dashboard:testCallWebhookBaseUrl", testCallWebhookBaseUrl.trim());
+      } catch {
+        // Ignore localStorage failures.
+      }
+
+      setTestCallOpen(false);
+      setMessage(`Test call started (${json?.sid || "no sid"})`);
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : "Failed to start test call";
+      setMessage(`Error: ${message}`);
+    } finally {
+      setIsStartingTestCall(false);
+    }
+  }
   const beginNodeDrag = (
     event: DragEvent<HTMLButtonElement>,
     type: "prompt" | "action" | "condition" | "knowledge" | "handoff"
@@ -952,6 +1028,14 @@ export default function Home() {
                     Load Variant
                   </button>
                 )}
+                {selectedType === 'client' && canSave && (
+                  <button
+                    onClick={() => setTestCallOpen(true)}
+                    className="flex items-center gap-2 px-3 py-2 text-sm rounded font-medium transition border border-teal-600 text-teal-300 hover:text-white hover:bg-teal-700/30"
+                  >
+                    Test Call
+                  </button>
+                )}
                 <button
                   onClick={saveConfig}
                   disabled={!canSave}
@@ -1215,6 +1299,62 @@ export default function Home() {
             <div className="flex justify-end gap-2">
               <button onClick={() => setModalOpen(false)} className="px-4 py-2 text-gray-400 hover:text-white">Cancel</button>
               <button onClick={handleModalSubmit} className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded">Confirm</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {testCallOpen && (
+        <div className="absolute inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-gray-800 border border-gray-600 p-6 rounded shadow-xl w-[32rem]">
+            <h3 className="text-lg font-bold mb-4 text-white">Start Test Call</h3>
+            <div className="space-y-3">
+              <div className="text-xs text-gray-400">
+                Client: <span className="text-white">{selectedClient || "-"}</span> / Industry: <span className="text-white">{selectedIndustry || "-"}</span>
+              </div>
+              <div className="text-xs text-gray-400">
+                Workflow: <span className="text-white">{selectedWorkflowKey || "first_response"}</span>
+              </div>
+              <input
+                type="text"
+                className="w-full bg-gray-900 border border-gray-600 rounded p-2 text-white"
+                placeholder="To number (e.g. +447xxxxxxxxx)"
+                value={testCallTo}
+                onChange={(e) => setTestCallTo(e.target.value)}
+              />
+              <input
+                type="text"
+                className="w-full bg-gray-900 border border-gray-600 rounded p-2 text-white"
+                placeholder="From number (Twilio number)"
+                value={testCallFrom}
+                onChange={(e) => setTestCallFrom(e.target.value)}
+              />
+              <input
+                type="text"
+                className="w-full bg-gray-900 border border-gray-600 rounded p-2 text-white"
+                placeholder="Voice webhook base URL (e.g. https://app-voice-agent.example.com)"
+                value={testCallWebhookBaseUrl}
+                onChange={(e) => setTestCallWebhookBaseUrl(e.target.value)}
+              />
+              <div className="text-[11px] text-gray-500">
+                This will place a real Twilio outbound call and force routing to the selected workflow.
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 mt-4">
+              <button
+                onClick={() => setTestCallOpen(false)}
+                className="px-4 py-2 text-gray-400 hover:text-white"
+                disabled={isStartingTestCall}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={startTestCall}
+                disabled={isStartingTestCall}
+                className={`px-4 py-2 rounded text-white ${isStartingTestCall ? "bg-gray-700 cursor-not-allowed" : "bg-teal-600 hover:bg-teal-500"}`}
+              >
+                {isStartingTestCall ? "Starting..." : "Start Call"}
+              </button>
             </div>
           </div>
         </div>

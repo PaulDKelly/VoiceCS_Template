@@ -173,6 +173,12 @@ async def twilio_voice_handler(req: Request) -> Response:
     logger.info(f"Generated Twilio WebSocket URL: {ws_url}")
     logger.info(f"Caller ID: {caller_number}, Called Number: {called_number}")
 
+    # Optional test-call overrides from query string
+    query_client_id = (req.query.get("client_id") or "").strip()
+    query_industry = (req.query.get("industry") or "").strip()
+    query_test_workflow = (req.query.get("test_workflow") or "").strip()
+    query_test_mode = (req.query.get("test_mode") or "").strip()
+
     # Phone Number Routing Logic
     client_id = os.getenv("CLIENT_ID")
     industry = os.getenv("INDUSTRY")
@@ -206,6 +212,20 @@ async def twilio_voice_handler(req: Request) -> Response:
     except Exception as e:
         logger.error(f"Failed to load phone mappings: {e}")
 
+    # Explicit test-call override bypasses number mapping constraints.
+    if query_client_id and query_industry:
+        client_id = query_client_id
+        industry = query_industry
+        mapping_found = True
+        candidate_used = "__test_override__"
+        logger.info(
+            "Using test override routing -> client_id=%s, industry=%s, workflow=%s, test_mode=%s",
+            client_id,
+            industry,
+            query_test_workflow or "(none)",
+            query_test_mode or "(none)",
+        )
+
     # If no mapping found, reject unless explicitly allowed
     allow_unmapped = str(os.getenv("ALLOW_UNMAPPED_CALLS", "")).lower() in ("1", "true", "yes")
     if not mapping_found and not allow_unmapped:
@@ -217,10 +237,15 @@ async def twilio_voice_handler(req: Request) -> Response:
 
     # Pass configuration via Query Parameters so WebSocket can access them immediately
     import urllib.parse
-    params = urllib.parse.urlencode({
+    params_obj = {
         "client_id": client_id,
         "industry": industry
-    })
+    }
+    if query_test_workflow:
+        params_obj["test_workflow"] = query_test_workflow
+    if query_test_mode:
+        params_obj["test_mode"] = query_test_mode
+    params = urllib.parse.urlencode(params_obj)
     ws_url_with_params = f"{ws_url}?{params}"
     
     response = VoiceResponse()
@@ -230,6 +255,10 @@ async def twilio_voice_handler(req: Request) -> Response:
     stream.parameter(name="called_number", value=called_number)
     stream.parameter(name="client_id", value=client_id)
     stream.parameter(name="industry", value=industry)
+    if query_test_workflow:
+        stream.parameter(name="test_workflow", value=query_test_workflow)
+    if query_test_mode:
+        stream.parameter(name="test_mode", value=query_test_mode)
     connect.append(stream)
     response.append(connect)
 
