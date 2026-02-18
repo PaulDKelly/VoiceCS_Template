@@ -23,6 +23,11 @@ type NodePickerAction = {
 };
 type LeftEditorTab = "none" | "prompts" | "config" | "json" | "phone_routing";
 
+type SimCallLog = {
+  ts: string;
+  message: string;
+};
+
 export default function Home() {
   const { data: session, status } = useSession();
   const [user, setUser] = useState<any | null>(null);
@@ -75,6 +80,16 @@ export default function Home() {
   const [testCallFrom, setTestCallFrom] = useState("");
   const [testCallWebhookBaseUrl, setTestCallWebhookBaseUrl] = useState("");
   const [isStartingTestCall, setIsStartingTestCall] = useState(false);
+  const [simulateCallOpen, setSimulateCallOpen] = useState(false);
+  const [isSimulatingCall, setIsSimulatingCall] = useState(false);
+  const [simCallLogs, setSimCallLogs] = useState<SimCallLog[]>([]);
+  const wsRef = useRef<WebSocket | null>(null);
+  const simStreamSidRef = useRef<string>("");
+  const simAudioContextRef = useRef<AudioContext | null>(null);
+  const simMediaStreamRef = useRef<MediaStream | null>(null);
+  const simSourceNodeRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const simProcessorNodeRef = useRef<ScriptProcessorNode | null>(null);
+  const simNextPlaybackTimeRef = useRef<number>(0);
 
   useEffect(() => {
     if (status === "authenticated") {
@@ -520,9 +535,14 @@ export default function Home() {
     if (typeof window === "undefined") return;
     try {
       setTestCallTo(localStorage.getItem("dashboard:testCallTo") || "");
-      setTestCallWebhookBaseUrl(localStorage.getItem("dashboard:testCallWebhookBaseUrl") || "");
+      const savedWebhook = localStorage.getItem("dashboard:testCallWebhookBaseUrl") || "";
+      const nextWebhook = shouldIgnoreSavedWebhook(savedWebhook)
+        ? inferDefaultVoiceWebhookBaseUrl()
+        : (savedWebhook || inferDefaultVoiceWebhookBaseUrl());
+      setTestCallWebhookBaseUrl(nextWebhook);
     } catch {
       // Ignore localStorage failures.
+      setTestCallWebhookBaseUrl(inferDefaultVoiceWebhookBaseUrl());
     }
   }, []);
 
@@ -573,6 +593,305 @@ export default function Home() {
   const toggleSection = (section: "context" | "workflows" | "picker") => {
     setCollapsedSections((prev) => ({ ...prev, [section]: !prev[section] }));
   };
+
+  function inferDefaultVoiceWebhookBaseUrl() {
+    if (typeof window === "undefined") return "";
+    const envUrl = (process.env.NEXT_PUBLIC_VOICE_WEBHOOK_BASE_URL || "").trim();
+    if (envUrl) return envUrl;
+
+    try {
+      const current = new URL(window.location.origin);
+      const host = current.hostname;
+      if (host.includes("app-workflow-manager")) {
+        current.hostname = host.replace("app-workflow-manager", "app-voice-agent");
+        return current.origin;
+      }
+      return current.origin;
+    } catch {
+      return "";
+    }
+  }
+
+  function shouldIgnoreSavedWebhook(savedWebhook: string) {
+    if (!savedWebhook || typeof window === "undefined") return false;
+    try {
+      const saved = new URL(savedWebhook);
+      const current = new URL(window.location.origin);
+      const savedIsLocal =
+        saved.hostname === "localhost" ||
+        saved.hostname === "127.0.0.1" ||
+        saved.hostname === "::1";
+      const currentIsLocal =
+        current.hostname === "localhost" ||
+        current.hostname === "127.0.0.1" ||
+        current.hostname === "::1";
+      return savedIsLocal && !currentIsLocal;
+    } catch {
+      return false;
+    }
+  }
+
+  const addSimLog = (message: string) => {
+    const ts = new Date().toLocaleTimeString();
+    setSimCallLogs((prev) => [...prev.slice(-79), { ts, message }]);
+  };
+
+  const base64FromBytes = (bytes: Uint8Array) => {
+    let binary = "";
+    const chunkSize = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+      const sub = bytes.subarray(i, i + chunkSize);
+      binary += String.fromCharCode(...sub);
+    }
+    return btoa(binary);
+  };
+
+  const bytesFromBase64 = (b64: string) => {
+    const binary = atob(b64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+    return bytes;
+  };
+
+  const pcm16ToUlaw = (sample: number) => {
+    const BIAS = 0x84;
+    const CLIP = 32635;
+    const s = Math.max(-1, Math.min(1, sample));
+    let pcm = Math.round(s * 32767);
+    let sign = 0;
+    if (pcm < 0) {
+      sign = 0x80;
+      pcm = -pcm;
+    }
+    if (pcm > CLIP) pcm = CLIP;
+    pcm += BIAS;
+    let exponent = 7;
+    for (let expMask = 0x4000; (pcm & expMask) === 0 && exponent > 0; expMask >>= 1) {
+      exponent -= 1;
+    }
+    const mantissa = (pcm >> (exponent + 3)) & 0x0f;
+    const ulaw = ~(sign | (exponent << 4) | mantissa) & 0xff;
+    return ulaw;
+  };
+
+  const ulawToPcm16 = (ulaw: number) => {
+    const BIAS = 0x84;
+    const u = (~ulaw) & 0xff;
+    const sign = u & 0x80;
+    const exponent = (u >> 4) & 0x07;
+    const mantissa = u & 0x0f;
+    let pcm = ((mantissa << 3) + BIAS) << exponent;
+    pcm -= BIAS;
+    return sign ? -pcm : pcm;
+  };
+
+  const downsampleTo8k = (input: Float32Array, inputRate: number) => {
+    if (inputRate === 8000) return input;
+    const ratio = inputRate / 8000;
+    const outputLength = Math.max(1, Math.round(input.length / ratio));
+    const output = new Float32Array(outputLength);
+    let offsetResult = 0;
+    let offsetBuffer = 0;
+    while (offsetResult < output.length) {
+      const nextOffsetBuffer = Math.min(input.length, Math.round((offsetResult + 1) * ratio));
+      let accum = 0;
+      let count = 0;
+      for (let i = offsetBuffer; i < nextOffsetBuffer; i += 1) {
+        accum += input[i];
+        count += 1;
+      }
+      output[offsetResult] = count > 0 ? accum / count : 0;
+      offsetResult += 1;
+      offsetBuffer = nextOffsetBuffer;
+    }
+    return output;
+  };
+
+  const resolveWsUrl = (baseUrl: string, client: string, industry: string, workflow: string) => {
+    const trimmed = baseUrl.trim().replace(/\/+$/, "");
+    const wsBase = trimmed.startsWith("https://")
+      ? trimmed.replace("https://", "wss://")
+      : trimmed.startsWith("http://")
+        ? trimmed.replace("http://", "ws://")
+        : trimmed;
+    const wsUrl = new URL(`${wsBase}/api/audio-twilio`);
+    wsUrl.searchParams.set("client_id", client);
+    wsUrl.searchParams.set("industry", industry);
+    wsUrl.searchParams.set("test_mode", "1");
+    wsUrl.searchParams.set("test_workflow", workflow);
+    return wsUrl.toString();
+  };
+
+  const stopSimulatedCall = (silent = false) => {
+    try {
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        const sid = simStreamSidRef.current || `sim-${Date.now()}`;
+        wsRef.current.send(JSON.stringify({ event: "stop", streamSid: sid }));
+      }
+    } catch {
+      // Ignore close send failures.
+    }
+    try {
+      wsRef.current?.close();
+    } catch {
+      // Ignore close failures.
+    }
+    wsRef.current = null;
+
+    try {
+      simProcessorNodeRef.current?.disconnect();
+      simSourceNodeRef.current?.disconnect();
+      simMediaStreamRef.current?.getTracks().forEach((t) => t.stop());
+    } catch {
+      // Ignore media cleanup failures.
+    }
+    simProcessorNodeRef.current = null;
+    simSourceNodeRef.current = null;
+    simMediaStreamRef.current = null;
+
+    const ctx = simAudioContextRef.current;
+    if (ctx && ctx.state !== "closed") {
+      ctx.close().catch(() => undefined);
+    }
+    simAudioContextRef.current = null;
+    simNextPlaybackTimeRef.current = 0;
+    setIsSimulatingCall(false);
+    if (!silent) addSimLog("Simulation stopped");
+  };
+
+  async function startSimulatedCall() {
+    if (!selectedIndustry || !selectedClient || selectedType !== "client") {
+      setMessage("Error: Select a client config before starting simulation.");
+      return;
+    }
+    if (!testCallWebhookBaseUrl.trim()) {
+      setMessage("Error: Voice Webhook URL is required for simulation.");
+      return;
+    }
+
+    try {
+      setSimCallLogs([]);
+      setIsSimulatingCall(true);
+      addSimLog("Requesting microphone access...");
+      const mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      simMediaStreamRef.current = mediaStream;
+
+      const audioContext = new AudioContext({ sampleRate: 48000 });
+      simAudioContextRef.current = audioContext;
+      const sourceNode = audioContext.createMediaStreamSource(mediaStream);
+      const processorNode = audioContext.createScriptProcessor(2048, 1, 1);
+      simSourceNodeRef.current = sourceNode;
+      simProcessorNodeRef.current = processorNode;
+
+      const workflow = selectedWorkflowKey || "first_response";
+      const wsUrl = resolveWsUrl(testCallWebhookBaseUrl, selectedClient, selectedIndustry, workflow);
+      addSimLog(`Connecting WebSocket: ${wsUrl}`);
+
+      const ws = new WebSocket(wsUrl);
+      wsRef.current = ws;
+      const streamSid = `sim-${Date.now()}`;
+      const callSid = `simcall-${Date.now()}`;
+      simStreamSidRef.current = streamSid;
+
+      ws.onopen = () => {
+        addSimLog("Connected. Starting simulated call...");
+        ws.send(
+          JSON.stringify({
+            event: "start",
+            start: {
+              streamSid,
+              callSid,
+              customParameters: {
+                phone_number: "client:browser",
+                called_number: testCallFrom || "browser",
+                client_id: selectedClient,
+                industry: selectedIndustry,
+                test_mode: "1",
+                test_workflow: workflow
+              }
+            }
+          })
+        );
+      };
+
+      ws.onmessage = (ev) => {
+        try {
+          const data = JSON.parse(ev.data as string) as {
+            event?: string;
+            media?: { payload?: string };
+          };
+          if (data.event === "clear") {
+            if (simAudioContextRef.current) {
+              simNextPlaybackTimeRef.current = simAudioContextRef.current.currentTime;
+            }
+            return;
+          }
+          if (data.event !== "media" || !data.media?.payload || !simAudioContextRef.current) return;
+
+          const ulawBytes = bytesFromBase64(data.media.payload);
+          const pcmFloat = new Float32Array(ulawBytes.length);
+          for (let i = 0; i < ulawBytes.length; i += 1) {
+            pcmFloat[i] = ulawToPcm16(ulawBytes[i]) / 32768;
+          }
+
+          const ctx = simAudioContextRef.current;
+          const buffer = ctx.createBuffer(1, pcmFloat.length, 8000);
+          buffer.copyToChannel(pcmFloat, 0);
+          const src = ctx.createBufferSource();
+          src.buffer = buffer;
+          src.connect(ctx.destination);
+
+          const now = ctx.currentTime;
+          const startAt = Math.max(simNextPlaybackTimeRef.current || now, now + 0.01);
+          src.start(startAt);
+          simNextPlaybackTimeRef.current = startAt + buffer.duration;
+        } catch {
+          // Ignore non-json/unknown events.
+        }
+      };
+
+      ws.onclose = () => {
+        addSimLog("WebSocket closed");
+        stopSimulatedCall();
+      };
+      ws.onerror = () => {
+        addSimLog("WebSocket error");
+      };
+
+      processorNode.onaudioprocess = (event) => {
+        const socket = wsRef.current;
+        if (!socket || socket.readyState !== WebSocket.OPEN) return;
+        const input = event.inputBuffer.getChannelData(0);
+        const downsampled = downsampleTo8k(input, audioContext.sampleRate);
+        const ulaw = new Uint8Array(downsampled.length);
+        for (let i = 0; i < downsampled.length; i += 1) {
+          ulaw[i] = pcm16ToUlaw(downsampled[i]);
+        }
+        socket.send(
+          JSON.stringify({
+            event: "media",
+            streamSid,
+            media: { payload: base64FromBytes(ulaw) }
+          })
+        );
+      };
+
+      sourceNode.connect(processorNode);
+      processorNode.connect(audioContext.destination);
+      addSimLog("Streaming microphone audio to agent");
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Failed to start simulation";
+      setMessage(`Error: ${msg}`);
+      setIsSimulatingCall(false);
+      stopSimulatedCall();
+    }
+  }
+
+  useEffect(() => {
+    return () => {
+      stopSimulatedCall(true);
+    };
+  }, []);
 
   async function startTestCall() {
     if (!selectedIndustry || !selectedClient || selectedType !== "client") {
@@ -1036,6 +1355,14 @@ export default function Home() {
                     Test Call
                   </button>
                 )}
+                {selectedType === 'client' && canSave && (
+                  <button
+                    onClick={() => setSimulateCallOpen(true)}
+                    className="flex items-center gap-2 px-3 py-2 text-sm rounded font-medium transition border border-cyan-600 text-cyan-300 hover:text-white hover:bg-cyan-700/30"
+                  >
+                    Simulate Call
+                  </button>
+                )}
                 <button
                   onClick={saveConfig}
                   disabled={!canSave}
@@ -1355,6 +1682,75 @@ export default function Home() {
               >
                 {isStartingTestCall ? "Starting..." : "Start Call"}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {simulateCallOpen && (
+        <div className="absolute inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-gray-800 border border-gray-600 p-6 rounded shadow-xl w-[36rem] max-h-[85vh] overflow-hidden flex flex-col">
+            <h3 className="text-lg font-bold mb-4 text-white">Simulate Call (Browser Mic)</h3>
+            <div className="space-y-3">
+              <div className="text-xs text-gray-400">
+                Client: <span className="text-white">{selectedClient || "-"}</span> / Industry: <span className="text-white">{selectedIndustry || "-"}</span>
+              </div>
+              <div className="text-xs text-gray-400">
+                Workflow: <span className="text-white">{selectedWorkflowKey || "first_response"}</span>
+              </div>
+              <input
+                type="text"
+                className="w-full bg-gray-900 border border-gray-600 rounded p-2 text-white"
+                placeholder="Voice webhook base URL (e.g. https://app-voice-agent.example.com)"
+                value={testCallWebhookBaseUrl}
+                onChange={(e) => setTestCallWebhookBaseUrl(e.target.value)}
+                disabled={isSimulatingCall}
+              />
+              <div className="text-[11px] text-gray-500">
+                Uses your microphone and routes directly to the selected workflow in test mode.
+              </div>
+            </div>
+
+            <div className="mt-3 flex-1 min-h-0 rounded border border-gray-700 bg-gray-900/60 p-2 overflow-y-auto">
+              {simCallLogs.length === 0 ? (
+                <div className="text-xs text-gray-500">No simulation events yet.</div>
+              ) : (
+                <div className="space-y-1">
+                  {simCallLogs.map((log, i) => (
+                    <div key={`${log.ts}-${i}`} className="text-xs">
+                      <span className="text-gray-500">[{log.ts}]</span>{" "}
+                      <span className="text-gray-300">{log.message}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-end gap-2 mt-4">
+              <button
+                onClick={() => {
+                  if (isSimulatingCall) stopSimulatedCall();
+                  setSimulateCallOpen(false);
+                }}
+                className="px-4 py-2 text-gray-400 hover:text-white"
+              >
+                Close
+              </button>
+              {!isSimulatingCall ? (
+                <button
+                  onClick={startSimulatedCall}
+                  className="px-4 py-2 rounded text-white bg-cyan-600 hover:bg-cyan-500"
+                >
+                  Start Simulation
+                </button>
+              ) : (
+                <button
+                  onClick={stopSimulatedCall}
+                  className="px-4 py-2 rounded text-white bg-red-600 hover:bg-red-500"
+                >
+                  Stop Simulation
+                </button>
+              )}
             </div>
           </div>
         </div>
