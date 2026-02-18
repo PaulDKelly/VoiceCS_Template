@@ -819,7 +819,28 @@ export default function Home() {
           const data = JSON.parse(ev.data as string) as {
             event?: string;
             media?: { payload?: string };
+            kind?: string;
+            intent?: string;
+            previous_intent?: string;
+            current_node_id?: string;
+            test_workflow?: string;
           };
+          if (data.event === "sim_state") {
+            if (data.kind === "workflow_handoff") {
+              addSimLog(
+                `Handoff: ${data.previous_intent || "unknown"} -> ${data.intent || "unknown"}`
+              );
+            } else if (data.kind === "session_start") {
+              addSimLog(
+                `Session started: intent=${data.intent || "-"} node=${data.current_node_id || "-"}`
+              );
+            } else {
+              addSimLog(
+                `Turn: intent=${data.intent || "-"} node=${data.current_node_id || "-"}`
+              );
+            }
+            return;
+          }
           if (data.event === "clear") {
             if (simAudioContextRef.current) {
               simNextPlaybackTimeRef.current = simAudioContextRef.current.currentTime;

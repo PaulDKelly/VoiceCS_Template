@@ -61,6 +61,7 @@ class TwilioBridge:
         self.stream_sid = None
         self.session_id = None
         self._is_active = False
+        self._emit_sim_events = False
 
     async def handle_websocket(self, websocket):
         self.websocket = websocket
@@ -110,6 +111,7 @@ class TwilioBridge:
                          # Strip 'client:' prefix if testing from browser
                          if from_number.startswith("client:"):
                              from_number = from_number.replace("client:", "")
+                    self._emit_sim_events = str(test_mode or "").lower() in ("1", "true", "yes")
 
                     # IF not resolved from query/custom, try to resolve via Phone Mapping (Source of Truth)
                     # This handles cases where people call the bot directly without passing params
@@ -245,6 +247,20 @@ class TwilioBridge:
                         f"Industry={industry}, TestWorkflow={test_workflow}"
                     )
 
+                    if self._emit_sim_events and self.websocket:
+                        try:
+                            await self.websocket.send_text(json.dumps({
+                                "event": "sim_state",
+                                "kind": "session_start",
+                                "intent": session.get("intent"),
+                                "current_node_id": session.get("current_node_id"),
+                                "client_id": session.get("client_id"),
+                                "industry": session.get("industry"),
+                                "test_workflow": test_workflow or ""
+                            }))
+                        except Exception:
+                            pass
+
                     # Warm Azure TTS cache for common prompts to reduce latency
                     if self.tts_provider in ("azure", "azure_neural", "azure_tts"):
                         try:
@@ -310,6 +326,12 @@ class TwilioBridge:
 
         # 1. Get Agent Response
         logger.info(f"Processing text: {text} | Session: {self.session_id}")
+        prev_intent = None
+        try:
+            from shared_code.utils.session import load_session
+            prev_intent = (load_session(self.session_id) or {}).get("intent")
+        except Exception:
+            prev_intent = None
         try:
             response = run_agent_step(self.session_id, text)
         except Exception as e:
@@ -327,6 +349,22 @@ class TwilioBridge:
                 text,
             )
             reply_text = "Sorry, I didn't catch that. Could you repeat that for me?"
+
+        if self._emit_sim_events and self.websocket:
+            try:
+                next_session = response.get("session") if isinstance(response, dict) else None
+                next_intent = (next_session or {}).get("intent")
+                current_node_id = (next_session or {}).get("current_node_id")
+                event_kind = "workflow_handoff" if next_intent and prev_intent and next_intent != prev_intent else "turn"
+                await self.websocket.send_text(json.dumps({
+                    "event": "sim_state",
+                    "kind": event_kind,
+                    "previous_intent": prev_intent,
+                    "intent": next_intent,
+                    "current_node_id": current_node_id
+                }))
+            except Exception:
+                pass
         
         # Check for Hangup Signal
         should_hangup = False
