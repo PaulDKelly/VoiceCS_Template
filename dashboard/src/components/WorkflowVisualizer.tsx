@@ -905,7 +905,8 @@ function WorkflowVisualizerInner({
     const promptKeysAll = jsonContent.prompts ? Object.keys(jsonContent.prompts) : [];
     const promptKeysByIntent = selectedWorkflowKey
         ? promptKeysAll.filter(k => k === selectedWorkflowKey || k.startsWith(`${selectedWorkflowKey}_`))
-        : promptKeysAll;
+        : [];
+    const promptKeysOutsideIntent = promptKeysAll.filter(k => !promptKeysByIntent.includes(k));
     const usedPromptKeys = new Set<string>();
     nodes.forEach((node: any) => {
         const pk = node?.data?.promptKey;
@@ -915,7 +916,8 @@ function WorkflowVisualizerInner({
     });
     const promptKeys = Array.from(new Set([
         ...promptKeysByIntent,
-        ...Array.from(usedPromptKeys).filter(k => promptKeysAll.includes(k))
+        ...Array.from(usedPromptKeys).filter(k => promptKeysAll.includes(k)),
+        ...promptKeysOutsideIntent
     ]));
     const selectedNode = nodes.find(n => n.id === selectedNodeId);
     const promptKeyUsageCount = selectedNode?.data?.promptKey ? countNodesUsingPromptKey(selectedNode.data.promptKey) : 0;
@@ -1313,6 +1315,22 @@ function WorkflowVisualizerInner({
 
                                 {selectedNode.data.actionType === 'knowledge_search' && (
                                     <div className="space-y-2 max-h-[48vh] overflow-y-auto pr-1">
+                                        <div>
+                                            <label className="text-[10px] text-gray-400 mb-1 block">KB Connection Ref (Client Config)</label>
+                                            <select
+                                                className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs focus:border-blue-500 outline-none"
+                                                value={selectedNode.data.actionConfig?.kb_connection_ref || ""}
+                                                onChange={(e) => handleActionConfigChange("kb_connection_ref", e.target.value)}
+                                            >
+                                                <option value="">-- none (node-level settings) --</option>
+                                                {Object.keys(jsonContent.knowledge_base_connections || {}).map(k => (
+                                                    <option key={k} value={k}>{k}</option>
+                                                ))}
+                                            </select>
+                                            <div className="text-[10px] text-gray-500 mt-1">
+                                                Recommended: keep endpoint/index/key in Client Config and only set query behavior on node.
+                                            </div>
+                                        </div>
                                         <input
                                             type="text"
                                             className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs"

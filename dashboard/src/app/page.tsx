@@ -468,6 +468,18 @@ export default function Home() {
     return Array.from(new Set<string>(base));
   })();
   const filteredWorkflowKeys = workflowKeys.filter((k) => k.toLowerCase().includes(workflowFilter.trim().toLowerCase()));
+  const pickerQuery = pickerClientSearch.trim().toLowerCase();
+  const visibleClients = (list
+    ? Object.entries(list.clients).flatMap(([industry, clients]) =>
+      (clients || []).map((client) => ({ industry, client }))
+    )
+    : []
+  ).filter(({ industry, client }) => {
+    if (!pickerQuery) return true;
+    const clientMatch = client.toLowerCase().includes(pickerQuery);
+    const industryMatch = industry.toLowerCase().includes(pickerQuery);
+    return clientMatch || industryMatch;
+  });
 
   useEffect(() => {
     if (activeTab !== "workflows") return;
@@ -548,6 +560,9 @@ export default function Home() {
         : leftEditorTab === "json"
           ? "Raw JSON"
           : "Workflow Only";
+  const sidebarWidthClass = isSidebarCompact ? "w-[17%] min-w-[220px]" : "w-[21%] min-w-[260px]";
+  const sidebarSectionPaddingClass = isSidebarCompact ? "p-3" : "p-4";
+  const compactClientListClass = "max-h-[11.5rem]";
 
   if (status === "loading") {
     return <div className="flex items-center justify-center h-screen bg-gray-900 text-white">Loading session...</div>;
@@ -648,9 +663,9 @@ export default function Home() {
   return (
     <div className="flex h-screen bg-gray-900 text-gray-100 font-sans relative">
       {/* Sidebar */}
-      <div className={`${isSidebarCompact ? "w-[15%] min-w-[190px]" : "w-[18.75%] min-w-[220px]"} bg-gray-800 border-r border-gray-700 overflow-y-auto flex flex-col transition-all duration-200`}>
+      <div className={`${sidebarWidthClass} bg-gray-800 border-r border-gray-700 overflow-y-auto flex flex-col transition-all duration-200`}>
         {/* User Header */}
-        <div className="p-4 border-b border-gray-700 bg-gray-800/50">
+        <div className={`${sidebarSectionPaddingClass} border-b border-gray-700 bg-gray-800/50`}>
           <div className="flex items-center justify-between mb-2">
             <div className="flex flex-col">
               <span className="font-bold text-white">{user.name}</span>
@@ -706,8 +721,8 @@ export default function Home() {
           </div>
         </div>
 
-        <div className="p-4 bg-gray-900 sticky top-0 border-b border-gray-700 flex justify-between items-center">
-          <h1 className="text-xl font-bold text-blue-400">Configurations</h1>
+        <div className={`${sidebarSectionPaddingClass} bg-gray-900 sticky top-0 border-b border-gray-700 flex justify-between items-center`}>
+          <h1 className={`${isSidebarCompact ? "text-lg" : "text-xl"} font-bold text-blue-400`}>Configurations</h1>
           <div className="flex items-center gap-2">
             <button
               onClick={() => setIsSidebarCompact((v) => !v)}
@@ -725,92 +740,50 @@ export default function Home() {
         </div>
 
         {list && (
-          <div className="p-4 border-b border-gray-700">
+          <div className={`${sidebarSectionPaddingClass} border-b border-gray-700`}>
             <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Client Picker</h3>
             <div className="space-y-2">
-              <select
-                className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-sm text-white"
-                value={pickerIndustry}
-                onChange={(e) => {
-                  const nextIndustry = e.target.value;
-                  setPickerIndustry(nextIndustry);
-                  setPickerClientKey("");
-                  setPickerClientSearch("");
-                  if (nextIndustry) {
-                    loadConfig("industry", nextIndustry);
-                  }
-                }}
-              >
-                <option value="">Select industry...</option>
-                {list.industries.map((ind) => (
-                  <option key={ind} value={ind}>{ind}</option>
-                ))}
-              </select>
-
               <input
                 type="text"
-                className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-sm text-white"
-                placeholder={pickerIndustry ? "Search clients..." : "Search clients or industries..."}
+                className={`w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 ${isSidebarCompact ? "text-xs" : "text-sm"} text-white`}
+                placeholder="Filter clients or industries..."
                 value={pickerClientSearch}
                 onChange={(e) => setPickerClientSearch(e.target.value)}
               />
 
-              <select
-                className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-sm text-white disabled:opacity-50"
-                value={pickerClientKey}
-                onChange={(e) => {
-                  const nextKey = e.target.value;
-                  setPickerClientKey(nextKey);
-                  if (!nextKey) {
-                    if (pickerIndustry) loadConfig("industry", pickerIndustry);
-                    return;
-                  }
-                  const [industry, client] = nextKey.split("::");
-                  setPickerIndustry(industry || "");
-                  if (industry && client) loadConfig("client", industry, client);
-                }}
-              >
-                <option value="">Industry defaults...</option>
-                {(
-                  pickerIndustry
-                    ? (list.clients[pickerIndustry] || []).map((cli) => ({ industry: pickerIndustry, client: cli }))
-                    : Object.entries(list.clients).flatMap(([industry, clients]) =>
-                      (clients || []).map((client) => ({ industry, client }))
-                    )
-                ).filter(({ industry, client }) => {
-                  const q = pickerClientSearch.trim().toLowerCase();
-                  if (!q) return true;
-                  const clientMatch = client.toLowerCase().includes(q);
-                  const industryMatch = industry.toLowerCase().includes(q);
-                  return pickerIndustry ? clientMatch : (clientMatch || industryMatch);
-                }).map(({ industry, client }) => {
-                  const key = `${industry}::${client}`;
-                  return (
-                    <option key={key} value={key}>
-                      {pickerIndustry ? client : `${client} / ${industry}`}
-                    </option>
-                  );
-                })}
-                {(
-                  (
-                    pickerIndustry
-                      ? (list.clients[pickerIndustry] || []).map((cli) => ({ industry: pickerIndustry, client: cli }))
-                      : Object.entries(list.clients).flatMap(([industry, clients]) =>
-                        (clients || []).map((client) => ({ industry, client }))
-                      )
-                  ).filter(({ industry, client }) => {
-                    const q = pickerClientSearch.trim().toLowerCase();
-                    if (!q) return true;
-                    const clientMatch = client.toLowerCase().includes(q);
-                    const industryMatch = industry.toLowerCase().includes(q);
-                    return pickerIndustry ? clientMatch : (clientMatch || industryMatch);
-                  }).length === 0
-                ) && (
-                    <option value="" disabled>No matching clients</option>
+              <div>
+                <div className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">
+                  Clients (all industries) ({visibleClients.length})
+                </div>
+                <div className={`${compactClientListClass} overflow-y-auto rounded border border-gray-700 bg-gray-900/60 p-1 space-y-1`}>
+                  {visibleClients.map(({ industry, client }) => {
+                    const key = `${industry}::${client}`;
+                    return (
+                      <button
+                        key={key}
+                        title={`${client} (${industry})`}
+                        type="button"
+                        onClick={() => {
+                          setPickerIndustry(industry || "");
+                          setPickerClientKey(key);
+                          if (industry && client) loadConfig("client", industry, client);
+                        }}
+                        className={`w-full text-left px-2 py-1.5 text-xs rounded transition truncate ${pickerClientKey === key
+                          ? "bg-blue-600/20 text-blue-300 border border-blue-500/40"
+                          : "text-gray-300 hover:text-white hover:bg-gray-700"}`}
+                      >
+                        {client} / {industry}
+                      </button>
+                    );
+                  })}
+                  {visibleClients.length === 0 && (
+                    <div className="px-2 py-1 text-xs text-gray-500">No matching clients</div>
                   )}
-              </select>
+                </div>
+              </div>
+
               {isAdmin && (
-                <div className="grid grid-cols-3 gap-2 pt-1">
+                <div className={`grid ${isSidebarCompact ? "grid-cols-1" : "grid-cols-3"} gap-2 pt-1`}>
                   <button
                     type="button"
                     onClick={() => {
@@ -872,52 +845,6 @@ export default function Home() {
           </div>
         )}
 
-        {(selectedIndustry || selectedClient || canViewPhoneMappings) && (
-          <div className="p-4 border-b border-gray-700">
-            <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Left Panel Tabs</h3>
-            <div className="grid grid-cols-2 gap-1">
-              <button
-                onClick={() => {
-                  setActiveTab("workflows");
-                  setLeftEditorTab("none");
-                }}
-                className={`w-full text-left px-2 py-1.5 text-xs rounded transition ${leftEditorTab === "none" ? "bg-blue-600/20 text-blue-300 border border-blue-500/40" : "text-gray-400 hover:text-white hover:bg-gray-700"}`}
-              >
-                Workflow Only
-              </button>
-              <button
-                onClick={() => {
-                  setActiveTab("workflows");
-                  setLeftEditorTab("prompts");
-                }}
-                className={`w-full text-left px-2 py-1.5 text-xs rounded transition ${leftEditorTab === "prompts" ? "bg-blue-600/20 text-blue-300 border border-blue-500/40" : "text-gray-400 hover:text-white hover:bg-gray-700"}`}
-              >
-                Prompt Library
-              </button>
-              {selectedType === "client" && (
-                <button
-                  onClick={() => {
-                    setActiveTab("workflows");
-                    setLeftEditorTab("config");
-                  }}
-                  className={`w-full text-left px-2 py-1.5 text-xs rounded transition ${leftEditorTab === "config" ? "bg-blue-600/20 text-blue-300 border border-blue-500/40" : "text-gray-400 hover:text-white hover:bg-gray-700"}`}
-                >
-                  Client Config
-                </button>
-              )}
-              <button
-                onClick={() => {
-                  setActiveTab("workflows");
-                  setLeftEditorTab("json");
-                }}
-                className={`w-full text-left px-2 py-1.5 text-xs rounded transition ${leftEditorTab === "json" ? "bg-blue-600/20 text-blue-300 border border-blue-500/40" : "text-gray-400 hover:text-white hover:bg-gray-700"}`}
-              >
-                Raw JSON
-              </button>
-            </div>
-          </div>
-        )}
-
         <div className="p-2 flex-1 min-h-0 flex flex-col">
           <div className="text-xs text-gray-500 px-2">
             Client and workflow navigation is in this panel.
@@ -937,8 +864,8 @@ export default function Home() {
       <div className="flex-1 flex flex-col">
         {selectedIndustry || leftEditorTab === "phone_routing" || activeTab === 'phone_mappings' || activeTab === 'users' ? (
           <>
-            <div className="h-16 flex items-center justify-between px-6 bg-gray-800 border-b border-gray-700">
-              <div>
+            <div className="min-h-[64px] flex items-center justify-between px-6 py-3 bg-gray-800 border-b border-gray-700">
+              <div className="min-w-0">
                 <h2 className="text-lg font-semibold text-white">
                   {leftEditorTab === "phone_routing" || activeTab === 'phone_mappings' ? "Phone Number Routing" :
                     activeTab === 'users' ? "User Management" :
@@ -949,13 +876,56 @@ export default function Home() {
                 {!canSave && (selectedIndustry || leftEditorTab === "phone_routing" || activeTab === "phone_mappings") && (
                   <span className="text-xs text-yellow-400 block">Read-only access</span>
                 )}
+                {selectedIndustry && (
+                  <div className="text-xs text-gray-400 mt-1">
+                    Active View: <span className="text-white">{leftTabLabel}</span>
+                  </div>
+                )}
+                {selectedIndustry && activeTab === "workflows" && (
+                  <div className="mt-2">
+                    <div className="inline-flex flex-wrap gap-1 p-1 rounded-lg border border-gray-700 bg-gray-900/60">
+                    <button
+                      onClick={() => {
+                        setActiveTab("workflows");
+                        setLeftEditorTab("none");
+                      }}
+                      className={`px-3 py-1.5 text-xs rounded-md transition ${leftEditorTab === "none" ? "bg-blue-600/20 text-blue-300 border border-blue-500/40" : "text-gray-400 hover:text-white hover:bg-gray-700"}`}
+                    >
+                      Workflow Only
+                    </button>
+                    <button
+                      onClick={() => {
+                        setActiveTab("workflows");
+                        setLeftEditorTab("prompts");
+                      }}
+                      className={`px-3 py-1.5 text-xs rounded-md transition ${leftEditorTab === "prompts" ? "bg-blue-600/20 text-blue-300 border border-blue-500/40" : "text-gray-400 hover:text-white hover:bg-gray-700"}`}
+                    >
+                      Prompt Library
+                    </button>
+                    {selectedType === "client" && (
+                      <button
+                        onClick={() => {
+                          setActiveTab("workflows");
+                          setLeftEditorTab("config");
+                        }}
+                        className={`px-3 py-1.5 text-xs rounded-md transition ${leftEditorTab === "config" ? "bg-blue-600/20 text-blue-300 border border-blue-500/40" : "text-gray-400 hover:text-white hover:bg-gray-700"}`}
+                      >
+                        Client Config
+                      </button>
+                    )}
+                    <button
+                      onClick={() => {
+                        setActiveTab("workflows");
+                        setLeftEditorTab("json");
+                      }}
+                      className={`px-3 py-1.5 text-xs rounded-md transition ${leftEditorTab === "json" ? "bg-blue-600/20 text-blue-300 border border-blue-500/40" : "text-gray-400 hover:text-white hover:bg-gray-700"}`}
+                    >
+                      Raw JSON
+                    </button>
+                    </div>
+                  </div>
+                )}
               </div>
-
-              {selectedIndustry && (
-                <div className="text-sm text-gray-400">
-                  Active View: <span className="text-white">{leftTabLabel}</span>
-                </div>
-              )}
 
               <div className="flex items-center gap-2">
                 {selectedType === 'client' && canViewHistory && (
