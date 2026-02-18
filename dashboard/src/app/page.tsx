@@ -1745,7 +1745,7 @@ export default function Home() {
                 </button>
               ) : (
                 <button
-                  onClick={stopSimulatedCall}
+                  onClick={() => stopSimulatedCall()}
                   className="px-4 py-2 rounded text-white bg-red-600 hover:bg-red-500"
                 >
                   Stop Simulation
