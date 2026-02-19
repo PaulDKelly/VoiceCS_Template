@@ -1,0 +1,1248 @@
+{
+  "client_id": "retail_template",
+  "industry": "Retail",
+  "default_intent": "first_response",
+  "intents": [
+    "first_response",
+    "order_tracking",
+    "returns",
+    "refunds",
+    "warranty",
+    "product_support",
+    "delivery_issue",
+    "account",
+    "payment",
+    "general"
+  ],
+  "intent_routing_rules": {
+    "order_tracking": {
+      "keywords": [
+        "track",
+        "order",
+        "where",
+        "delivery",
+        "status"
+      ],
+      "enabled": true
+    },
+    "returns": {
+      "keywords": [
+        "return",
+        "send back",
+        "unwanted",
+        "wrong item"
+      ],
+      "enabled": true
+    },
+    "refunds": {
+      "keywords": [
+        "refund",
+        "money back",
+        "credit"
+      ],
+      "enabled": true
+    },
+    "warranty": {
+      "keywords": [
+        "faulty",
+        "broken",
+        "not working",
+        "issue",
+        "problem"
+      ],
+      "enabled": true
+    },
+    "product_support": {
+      "keywords": [
+        "help",
+        "support",
+        "setup",
+        "instructions",
+        "how to"
+      ],
+      "enabled": true
+    },
+    "delivery_issue": {
+      "keywords": [
+        "late",
+        "missing",
+        "lost",
+        "courier",
+        "delivery problem"
+      ],
+      "enabled": true
+    },
+    "account": {
+      "keywords": [
+        "login",
+        "account",
+        "password",
+        "sign in"
+      ],
+      "enabled": true
+    },
+    "payment": {
+      "keywords": [
+        "payment",
+        "card",
+        "failed",
+        "declined"
+      ],
+      "enabled": true
+    },
+    "general": {
+      "keywords": [],
+      "enabled": true
+    },
+    "priority": [
+      "order_tracking",
+      "returns",
+      "refunds",
+      "delivery_issue",
+      "warranty",
+      "product_support",
+      "payment",
+      "account",
+      "general"
+    ],
+    "fallback_to_llm": true
+  },
+  "prompts": {
+    "system_greeting": "Hi, I’m {assistant} with {brand}. Before we get started, can I take your name?",
+    "ask_intent_with_name": "How can I help you today, {name}?",
+    "ask_intent_retry_giveup": "How can I help you today?",
+    "ask_name_retry": "Sorry, I didn't catch your name. Could you say it again?",
+    "intent_fallback": "Sorry, I didn’t quite catch that. How can I help you today?",
+    "order_tracking_ask_order": "Sure, I can help with that. Could you tell me your order number?",
+    "order_tracking_ask_email": "Thanks. What email address did you use when placing the order?",
+    "order_tracking_ask_postcode": "And finally, could you confirm your delivery postcode?",
+    "returns_ask_item": "No problem. Which item would you like to return?",
+    "returns_ask_reason": "Thanks. What's the reason for the return?",
+    "returns_ask_condition": "Is the item unused and in its original packaging?",
+    "refunds_ask_item": "Which item would you like a refund for?",
+    "refunds_ask_reason": "Could you tell me the reason you're requesting a refund?",
+    "warranty_ask_purchase_date": "Do you know roughly when the item was purchased?",
+    "warranty_ask_issue": "Could you describe the issue you're experiencing?",
+    "warranty_expired_redirect": "Thanks. It looks like the item is outside the warranty period. I can still help with next steps.",
+    "delivery_issue_ask_tracking": "Have you received any tracking updates?",
+    "delivery_issue_ask_card": "Has the courier left a delivery card?",
+    "delivery_issue_ask_address": "Is the delivery address on your order correct?",
+    "product_support_ask_product": "Which product do you need help with?",
+    "product_support_ask_issue": "Could you describe the issue you're having?",
+    "product_support_ask_steps": "Have you tried any troubleshooting steps so far?",
+    "account_ask_email": "What's the email address on your account?",
+    "account_ask_issue": "What issue are you having with your account?",
+    "payment_ask_method": "Which payment method were you using?",
+    "payment_ask_error": "Did you receive any error messages?",
+    "first_response_greeting": "Hi, I’m {assistant} with {brand}. Before we get started, can I take your name?",
+    "first_response_ask_intent": "How can I help you today, {name}?"
+  },
+  "workflows": {
+    "account": {
+      "nodes": [
+        {
+          "id": "a1",
+          "type": "custom_input",
+          "data": {
+            "label": "Start Account Help",
+            "promptKey": "account_ask_email"
+          },
+          "position": {
+            "x": 250,
+            "y": 0
+          },
+          "width": 200,
+          "height": 40
+        },
+        {
+          "id": "a2",
+          "data": {
+            "label": "Ask Account Issue",
+            "promptKey": "account_ask_issue"
+          },
+          "position": {
+            "x": 250,
+            "y": 100
+          },
+          "width": 200,
+          "height": 40,
+          "type": "custom"
+        },
+        {
+          "id": "a3",
+          "data": {
+            "label": "Assess Account Issue"
+          },
+          "position": {
+            "x": 250,
+            "y": 200
+          },
+          "width": 200,
+          "height": 40,
+          "type": "custom"
+        },
+        {
+          "id": "a4_minor",
+          "data": {
+            "label": "Minor Issue (Provide Steps)"
+          },
+          "position": {
+            "x": 100,
+            "y": 300
+          },
+          "width": 220,
+          "height": 40,
+          "type": "custom"
+        },
+        {
+          "id": "a5_major",
+          "data": {
+            "label": "Major Issue (Needs Escalation)"
+          },
+          "position": {
+            "x": 400,
+            "y": 300
+          },
+          "width": 240,
+          "height": 40,
+          "type": "custom"
+        },
+        {
+          "id": "a6",
+          "data": {
+            "label": "Send Email & Hangup"
+          },
+          "position": {
+            "x": 250,
+            "y": 400
+          },
+          "width": 200,
+          "height": 40,
+          "type": "custom"
+        }
+      ],
+      "edges": [
+        {
+          "id": "ea1-2",
+          "source": "a1",
+          "target": "a2"
+        },
+        {
+          "id": "ea2-3",
+          "source": "a2",
+          "target": "a3"
+        },
+        {
+          "id": "ea3-4",
+          "source": "a3",
+          "target": "a4_minor",
+          "label": "Minor"
+        },
+        {
+          "id": "ea3-5",
+          "source": "a3",
+          "target": "a5_major",
+          "label": "Major"
+        },
+        {
+          "id": "ea4-6",
+          "source": "a4_minor",
+          "target": "a6"
+        },
+        {
+          "id": "ea5-6",
+          "source": "a5_major",
+          "target": "a6"
+        }
+      ]
+    },
+    "delivery_issue": {
+      "nodes": [
+        {
+          "id": "d1",
+          "type": "custom_input",
+          "data": {
+            "label": "Start Delivery Issue",
+            "promptKey": "order_tracking_ask_order"
+          },
+          "position": {
+            "x": 250,
+            "y": 0
+          },
+          "width": 200,
+          "height": 40
+        },
+        {
+          "id": "d2",
+          "data": {
+            "label": "Ask Tracking Updates",
+            "promptKey": "delivery_issue_ask_tracking"
+          },
+          "position": {
+            "x": 250,
+            "y": 100
+          },
+          "width": 200,
+          "height": 40,
+          "type": "custom"
+        },
+        {
+          "id": "d3",
+          "data": {
+            "label": "Ask If Courier Left Card",
+            "promptKey": "delivery_issue_ask_card"
+          },
+          "position": {
+            "x": 250,
+            "y": 200
+          },
+          "width": 220,
+          "height": 40,
+          "type": "custom"
+        },
+        {
+          "id": "d4",
+          "data": {
+            "label": "Ask If Address Correct",
+            "promptKey": "delivery_issue_ask_address"
+          },
+          "position": {
+            "x": 250,
+            "y": 300
+          },
+          "width": 220,
+          "height": 40,
+          "type": "custom"
+        },
+        {
+          "id": "d5",
+          "data": {
+            "label": "Assess Delivery Issue"
+          },
+          "position": {
+            "x": 250,
+            "y": 400
+          },
+          "width": 200,
+          "height": 40,
+          "type": "custom"
+        },
+        {
+          "id": "d6_minor",
+          "data": {
+            "label": "Minor Issue (Tracking Active)"
+          },
+          "position": {
+            "x": 100,
+            "y": 500
+          },
+          "width": 220,
+          "height": 40,
+          "type": "custom"
+        },
+        {
+          "id": "d7_major",
+          "data": {
+            "label": "Major Issue (No Movement / Lost)"
+          },
+          "position": {
+            "x": 400,
+            "y": 500
+          },
+          "width": 240,
+          "height": 40,
+          "type": "custom"
+        },
+        {
+          "id": "d8",
+          "data": {
+            "label": "Send Email & Hangup"
+          },
+          "position": {
+            "x": 250,
+            "y": 600
+          },
+          "width": 200,
+          "height": 40,
+          "type": "custom"
+        }
+      ],
+      "edges": [
+        {
+          "id": "ed1-2",
+          "source": "d1",
+          "target": "d2"
+        },
+        {
+          "id": "ed2-3",
+          "source": "d2",
+          "target": "d3"
+        },
+        {
+          "id": "ed3-4",
+          "source": "d3",
+          "target": "d4"
+        },
+        {
+          "id": "ed4-5",
+          "source": "d4",
+          "target": "d5"
+        },
+        {
+          "id": "ed5-6",
+          "source": "d5",
+          "target": "d6_minor",
+          "label": "Tracking Active"
+        },
+        {
+          "id": "ed5-7",
+          "source": "d5",
+          "target": "d7_major",
+          "label": "No Movement / Lost"
+        },
+        {
+          "id": "ed6-8",
+          "source": "d6_minor",
+          "target": "d8"
+        },
+        {
+          "id": "ed7-8",
+          "source": "d7_major",
+          "target": "d8"
+        }
+      ]
+    },
+    "general": {
+      "nodes": [
+        {
+          "id": "g1",
+          "type": "custom_input",
+          "data": {
+            "label": "Start General Enquiry",
+            "promptKey": "ask_intent_retry_giveup"
+          },
+          "position": {
+            "x": 250,
+            "y": 0
+          },
+          "width": 220,
+          "height": 40
+        },
+        {
+          "id": "g2",
+          "data": {
+            "label": "Clarify User Intent"
+          },
+          "position": {
+            "x": 250,
+            "y": 100
+          },
+          "width": 220,
+          "height": 40,
+          "type": "custom"
+        },
+        {
+          "id": "g3_route",
+          "data": {
+            "label": "Route to Best Intent"
+          },
+          "position": {
+            "x": 250,
+            "y": 200
+          },
+          "width": 220,
+          "height": 40,
+          "type": "custom"
+        },
+        {
+          "id": "g4",
+          "data": {
+            "label": "Send Email & Hangup"
+          },
+          "position": {
+            "x": 250,
+            "y": 300
+          },
+          "width": 220,
+          "height": 40,
+          "type": "custom"
+        }
+      ],
+      "edges": [
+        {
+          "id": "eg1-2",
+          "source": "g1",
+          "target": "g2"
+        },
+        {
+          "id": "eg2-3",
+          "source": "g2",
+          "target": "g3_route"
+        },
+        {
+          "id": "eg3-4",
+          "source": "g3_route",
+          "target": "g4"
+        }
+      ]
+    },
+    "order_tracking": {
+      "nodes": [
+        {
+          "id": "ot1",
+          "type": "custom_input",
+          "data": {
+            "label": "Start Order Tracking",
+            "promptKey": "order_tracking_ask_order"
+          },
+          "position": {
+            "x": 250,
+            "y": 0
+          },
+          "width": 180,
+          "height": 40
+        },
+        {
+          "id": "ot2",
+          "data": {
+            "label": "Ask Email",
+            "promptKey": "order_tracking_ask_email"
+          },
+          "position": {
+            "x": 250,
+            "y": 100
+          },
+          "width": 180,
+          "height": 40,
+          "type": "custom"
+        },
+        {
+          "id": "ot3",
+          "data": {
+            "label": "Ask Postcode",
+            "promptKey": "order_tracking_ask_postcode"
+          },
+          "position": {
+            "x": 250,
+            "y": 200
+          },
+          "width": 180,
+          "height": 40,
+          "type": "custom"
+        },
+        {
+          "id": "ot4",
+          "data": {
+            "label": "Lookup Order Status"
+          },
+          "position": {
+            "x": 250,
+            "y": 300
+          },
+          "width": 180,
+          "height": 40,
+          "type": "custom"
+        },
+        {
+          "id": "ot5",
+          "data": {
+            "label": "Provide Status"
+          },
+          "position": {
+            "x": 250,
+            "y": 400
+          },
+          "width": 180,
+          "height": 40,
+          "type": "custom"
+        },
+        {
+          "id": "ot6",
+          "data": {
+            "label": "Send Email & Hangup"
+          },
+          "position": {
+            "x": 250,
+            "y": 500
+          },
+          "width": 180,
+          "height": 40,
+          "type": "custom"
+        }
+      ],
+      "edges": [
+        {
+          "id": "eot1-2",
+          "source": "ot1",
+          "target": "ot2"
+        },
+        {
+          "id": "eot2-3",
+          "source": "ot2",
+          "target": "ot3"
+        },
+        {
+          "id": "eot3-4",
+          "source": "ot3",
+          "target": "ot4"
+        },
+        {
+          "id": "eot4-5",
+          "source": "ot4",
+          "target": "ot5"
+        },
+        {
+          "id": "eot5-6",
+          "source": "ot5",
+          "target": "ot6"
+        }
+      ]
+    },
+    "payment": {
+      "nodes": [
+        {
+          "id": "p1",
+          "type": "custom_input",
+          "data": {
+            "label": "Start Payment Help",
+            "promptKey": "payment_ask_method"
+          },
+          "position": {
+            "x": 250,
+            "y": 0
+          },
+          "width": 200,
+          "height": 40
+        },
+        {
+          "id": "p2",
+          "data": {
+            "label": "Ask Error Message",
+            "promptKey": "payment_ask_error"
+          },
+          "position": {
+            "x": 250,
+            "y": 100
+          },
+          "width": 200,
+          "height": 40,
+          "type": "custom"
+        },
+        {
+          "id": "p3",
+          "data": {
+            "label": "Assess Payment Issue"
+          },
+          "position": {
+            "x": 250,
+            "y": 200
+          },
+          "width": 200,
+          "height": 40,
+          "type": "custom"
+        },
+        {
+          "id": "p4_minor",
+          "data": {
+            "label": "Minor Issue (Provide Steps)"
+          },
+          "position": {
+            "x": 100,
+            "y": 300
+          },
+          "width": 220,
+          "height": 40,
+          "type": "custom"
+        },
+        {
+          "id": "p5_major",
+          "data": {
+            "label": "Major Issue (Needs Escalation)"
+          },
+          "position": {
+            "x": 400,
+            "y": 300
+          },
+          "width": 240,
+          "height": 40,
+          "type": "custom"
+        },
+        {
+          "id": "p6",
+          "data": {
+            "label": "Send Email & Hangup"
+          },
+          "position": {
+            "x": 250,
+            "y": 400
+          },
+          "width": 200,
+          "height": 40,
+          "type": "custom"
+        }
+      ],
+      "edges": [
+        {
+          "id": "ep1-2",
+          "source": "p1",
+          "target": "p2"
+        },
+        {
+          "id": "ep2-3",
+          "source": "p2",
+          "target": "p3"
+        },
+        {
+          "id": "ep3-4",
+          "source": "p3",
+          "target": "p4_minor",
+          "label": "Minor"
+        },
+        {
+          "id": "ep3-5",
+          "source": "p3",
+          "target": "p5_major",
+          "label": "Major"
+        },
+        {
+          "id": "ep4-6",
+          "source": "p4_minor",
+          "target": "p6"
+        },
+        {
+          "id": "ep5-6",
+          "source": "p5_major",
+          "target": "p6"
+        }
+      ]
+    },
+    "product_support": {
+      "nodes": [
+        {
+          "id": "ps1",
+          "type": "custom_input",
+          "data": {
+            "label": "Start Product Support",
+            "promptKey": "product_support_ask_product"
+          },
+          "position": {
+            "x": 250,
+            "y": 0
+          },
+          "width": 200,
+          "height": 40
+        },
+        {
+          "id": "ps2",
+          "data": {
+            "label": "Ask Issue",
+            "promptKey": "product_support_ask_issue"
+          },
+          "position": {
+            "x": 250,
+            "y": 100
+          },
+          "width": 200,
+          "height": 40,
+          "type": "custom"
+        },
+        {
+          "id": "ps3",
+          "data": {
+            "label": "Ask Troubleshooting Steps",
+            "promptKey": "product_support_ask_steps"
+          },
+          "position": {
+            "x": 250,
+            "y": 200
+          },
+          "width": 240,
+          "height": 40,
+          "type": "custom"
+        },
+        {
+          "id": "ps4",
+          "data": {
+            "label": "Assess Issue"
+          },
+          "position": {
+            "x": 250,
+            "y": 300
+          },
+          "width": 200,
+          "height": 40,
+          "type": "custom"
+        },
+        {
+          "id": "ps5_minor",
+          "data": {
+            "label": "Minor Issue (Provide Guidance)"
+          },
+          "position": {
+            "x": 100,
+            "y": 400
+          },
+          "width": 240,
+          "height": 40,
+          "type": "custom"
+        },
+        {
+          "id": "ps6_major",
+          "data": {
+            "label": "Major Issue (Needs Escalation)"
+          },
+          "position": {
+            "x": 400,
+            "y": 400
+          },
+          "width": 240,
+          "height": 40,
+          "type": "custom"
+        },
+        {
+          "id": "ps7",
+          "data": {
+            "label": "Send Email & Hangup"
+          },
+          "position": {
+            "x": 250,
+            "y": 500
+          },
+          "width": 200,
+          "height": 40,
+          "type": "custom"
+        }
+      ],
+      "edges": [
+        {
+          "id": "eps1-2",
+          "source": "ps1",
+          "target": "ps2"
+        },
+        {
+          "id": "eps2-3",
+          "source": "ps2",
+          "target": "ps3"
+        },
+        {
+          "id": "eps3-4",
+          "source": "ps3",
+          "target": "ps4"
+        },
+        {
+          "id": "eps4-5",
+          "source": "ps4",
+          "target": "ps5_minor",
+          "label": "Minor"
+        },
+        {
+          "id": "eps4-6",
+          "source": "ps4",
+          "target": "ps6_major",
+          "label": "Major"
+        },
+        {
+          "id": "eps5-7",
+          "source": "ps5_minor",
+          "target": "ps7"
+        },
+        {
+          "id": "eps6-7",
+          "source": "ps6_major",
+          "target": "ps7"
+        }
+      ]
+    },
+    "refunds": {
+      "nodes": [
+        {
+          "id": "rf1",
+          "type": "custom_input",
+          "data": {
+            "label": "Start Refund Request",
+            "promptKey": "refunds_ask_item"
+          },
+          "position": {
+            "x": 250,
+            "y": 0
+          },
+          "width": 180,
+          "height": 40
+        },
+        {
+          "id": "rf2",
+          "data": {
+            "label": "Ask Refund Reason",
+            "promptKey": "refunds_ask_reason"
+          },
+          "position": {
+            "x": 250,
+            "y": 100
+          },
+          "width": 180,
+          "height": 40,
+          "type": "custom"
+        },
+        {
+          "id": "rf3",
+          "data": {
+            "label": "Check Refund Eligibility"
+          },
+          "position": {
+            "x": 250,
+            "y": 200
+          },
+          "width": 180,
+          "height": 40,
+          "type": "custom"
+        },
+        {
+          "id": "rf4_valid",
+          "data": {
+            "label": "Refund Eligible"
+          },
+          "position": {
+            "x": 100,
+            "y": 300
+          },
+          "width": 180,
+          "height": 40,
+          "type": "custom"
+        },
+        {
+          "id": "rf5_invalid",
+          "data": {
+            "label": "Refund Not Eligible"
+          },
+          "position": {
+            "x": 400,
+            "y": 300
+          },
+          "width": 180,
+          "height": 40,
+          "type": "custom"
+        },
+        {
+          "id": "rf6",
+          "data": {
+            "label": "Send Email & Hangup"
+          },
+          "position": {
+            "x": 250,
+            "y": 400
+          },
+          "width": 180,
+          "height": 40,
+          "type": "custom"
+        }
+      ],
+      "edges": [
+        {
+          "id": "erf1-2",
+          "source": "rf1",
+          "target": "rf2"
+        },
+        {
+          "id": "erf2-3",
+          "source": "rf2",
+          "target": "rf3"
+        },
+        {
+          "id": "erf3-4",
+          "source": "rf3",
+          "target": "rf4_valid",
+          "label": "Eligible"
+        },
+        {
+          "id": "erf3-5",
+          "source": "rf3",
+          "target": "rf5_invalid",
+          "label": "Not Eligible"
+        },
+        {
+          "id": "erf4-6",
+          "source": "rf4_valid",
+          "target": "rf6"
+        },
+        {
+          "id": "erf5-6",
+          "source": "rf5_invalid",
+          "target": "rf6"
+        }
+      ]
+    },
+    "returns": {
+      "nodes": [
+        {
+          "id": "r1",
+          "type": "custom_input",
+          "data": {
+            "label": "Start Return Process",
+            "promptKey": "returns_ask_item"
+          },
+          "position": {
+            "x": 250,
+            "y": 0
+          },
+          "width": 180,
+          "height": 40
+        },
+        {
+          "id": "r2",
+          "data": {
+            "label": "Ask Reason",
+            "promptKey": "returns_ask_reason"
+          },
+          "position": {
+            "x": 250,
+            "y": 100
+          },
+          "width": 180,
+          "height": 40,
+          "type": "custom"
+        },
+        {
+          "id": "r3",
+          "data": {
+            "label": "Ask Condition",
+            "promptKey": "returns_ask_condition"
+          },
+          "position": {
+            "x": 250,
+            "y": 200
+          },
+          "width": 180,
+          "height": 40,
+          "type": "custom"
+        },
+        {
+          "id": "r4",
+          "data": {
+            "label": "Check Return Window"
+          },
+          "position": {
+            "x": 250,
+            "y": 300
+          },
+          "width": 180,
+          "height": 40,
+          "type": "custom"
+        },
+        {
+          "id": "r5_valid",
+          "data": {
+            "label": "Return Eligible"
+          },
+          "position": {
+            "x": 100,
+            "y": 400
+          },
+          "width": 180,
+          "height": 40,
+          "type": "custom"
+        },
+        {
+          "id": "r6_invalid",
+          "data": {
+            "label": "Return Not Eligible"
+          },
+          "position": {
+            "x": 400,
+            "y": 400
+          },
+          "width": 180,
+          "height": 40,
+          "type": "custom"
+        },
+        {
+          "id": "r7",
+          "data": {
+            "label": "Send Email & Hangup"
+          },
+          "position": {
+            "x": 250,
+            "y": 500
+          },
+          "width": 180,
+          "height": 40,
+          "type": "custom"
+        }
+      ],
+      "edges": [
+        {
+          "id": "er1-2",
+          "source": "r1",
+          "target": "r2"
+        },
+        {
+          "id": "er2-3",
+          "source": "r2",
+          "target": "r3"
+        },
+        {
+          "id": "er3-4",
+          "source": "r3",
+          "target": "r4"
+        },
+        {
+          "id": "er4-5",
+          "source": "r4",
+          "target": "r5_valid",
+          "label": "Eligible"
+        },
+        {
+          "id": "er4-6",
+          "source": "r4",
+          "target": "r6_invalid",
+          "label": "Not Eligible"
+        },
+        {
+          "id": "er5-7",
+          "source": "r5_valid",
+          "target": "r7"
+        },
+        {
+          "id": "er6-7",
+          "source": "r6_invalid",
+          "target": "r7"
+        }
+      ]
+    },
+    "warranty": {
+      "nodes": [
+        {
+          "id": "w1",
+          "type": "custom_input",
+          "data": {
+            "label": "Start Warranty Check",
+            "promptKey": "warranty_ask_purchase_date"
+          },
+          "position": {
+            "x": 250,
+            "y": 0
+          },
+          "width": 180,
+          "height": 40
+        },
+        {
+          "id": "w2",
+          "data": {
+            "label": "Calculate Warranty Status"
+          },
+          "position": {
+            "x": 250,
+            "y": 100
+          },
+          "width": 180,
+          "height": 40,
+          "type": "custom"
+        },
+        {
+          "id": "w3_in",
+          "data": {
+            "label": "In Warranty: Ask Issue",
+            "promptKey": "warranty_ask_issue"
+          },
+          "position": {
+            "x": 100,
+            "y": 200
+          },
+          "width": 200,
+          "height": 40,
+          "type": "custom"
+        },
+        {
+          "id": "w4_out",
+          "data": {
+            "label": "Out of Warranty: Redirect",
+            "promptKey": "warranty_expired_redirect"
+          },
+          "position": {
+            "x": 400,
+            "y": 200
+          },
+          "width": 220,
+          "height": 60,
+          "type": "custom"
+        },
+        {
+          "id": "w5",
+          "data": {
+            "label": "Send Email & Hangup"
+          },
+          "position": {
+            "x": 250,
+            "y": 320
+          },
+          "width": 180,
+          "height": 40,
+          "type": "custom"
+        }
+      ],
+      "edges": [
+        {
+          "id": "ew1-2",
+          "source": "w1",
+          "target": "w2"
+        },
+        {
+          "id": "ew2-3",
+          "source": "w2",
+          "target": "w3_in",
+          "label": "Within Warranty"
+        },
+        {
+          "id": "ew2-4",
+          "source": "w2",
+          "target": "w4_out",
+          "label": "Out of Warranty"
+        },
+        {
+          "id": "ew3-5",
+          "source": "w3_in",
+          "target": "w5"
+        },
+        {
+          "id": "ew4-5",
+          "source": "w4_out",
+          "target": "w5"
+        }
+      ]
+    },
+    "first_response": {
+      "nodes": [
+        {
+          "id": "fr1",
+          "type": "custom_input",
+          "data": {
+            "label": "Start First Response",
+            "promptKey": "first_response_greeting"
+          },
+          "position": {
+            "x": 250,
+            "y": 0
+          }
+        },
+        {
+          "id": "fr2",
+          "type": "custom",
+          "data": {
+            "label": "Ask Intent",
+            "promptKey": "first_response_ask_intent"
+          },
+          "position": {
+            "x": 250,
+            "y": 120
+          }
+        }
+      ],
+      "edges": [
+        {
+          "id": "efr1-2",
+          "source": "fr1",
+          "target": "fr2"
+        }
+      ]
+    }
+  }
+}

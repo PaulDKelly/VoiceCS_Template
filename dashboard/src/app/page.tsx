@@ -28,6 +28,24 @@ type SimCallLog = {
   message: string;
 };
 
+type CallTraceEntry = {
+  ts?: number;
+  event?: string;
+  session_id?: string;
+  client_id?: string;
+  industry?: string;
+  input_text?: string;
+  output_text?: string;
+  previous_intent?: string;
+  intent?: string;
+  previous_node_id?: string;
+  current_node_id?: string;
+  handoff?: boolean;
+  latency_ms?: number;
+  error?: string;
+  [key: string]: any;
+};
+
 export default function Home() {
   const { data: session, status } = useSession();
   const [user, setUser] = useState<any | null>(null);
@@ -41,6 +59,8 @@ export default function Home() {
   const [pickerClientKey, setPickerClientKey] = useState<string>("");
   const [pickerClientSearch, setPickerClientSearch] = useState("");
   const [showHistory, setShowHistory] = useState(false);
+  const [testingMenuOpen, setTestingMenuOpen] = useState(false);
+  const [versioningMenuOpen, setVersioningMenuOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<"prompts" | "workflows" | "config" | "phone_mappings" | "json" | "users">("workflows");
   const [leftEditorTab, setLeftEditorTab] = useState<LeftEditorTab>("none");
   const [nodePickerAction, setNodePickerAction] = useState<NodePickerAction | null>(null);
@@ -83,13 +103,21 @@ export default function Home() {
   const [simulateCallOpen, setSimulateCallOpen] = useState(false);
   const [isSimulatingCall, setIsSimulatingCall] = useState(false);
   const [simCallLogs, setSimCallLogs] = useState<SimCallLog[]>([]);
+  const [callTraceOpen, setCallTraceOpen] = useState(false);
+  const [callTraces, setCallTraces] = useState<CallTraceEntry[]>([]);
+  const [isLoadingCallTraces, setIsLoadingCallTraces] = useState(false);
+  const [callTraceError, setCallTraceError] = useState("");
   const wsRef = useRef<WebSocket | null>(null);
+  const testingMenuRef = useRef<HTMLDivElement | null>(null);
+  const versioningMenuRef = useRef<HTMLDivElement | null>(null);
   const simStreamSidRef = useRef<string>("");
   const simAudioContextRef = useRef<AudioContext | null>(null);
   const simMediaStreamRef = useRef<MediaStream | null>(null);
   const simSourceNodeRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const simProcessorNodeRef = useRef<ScriptProcessorNode | null>(null);
+  const simGainNodeRef = useRef<GainNode | null>(null);
   const simNextPlaybackTimeRef = useRef<number>(0);
+  const simReceivedAudioRef = useRef<number>(0);
 
   useEffect(() => {
     if (status === "authenticated") {
@@ -97,6 +125,20 @@ export default function Home() {
       fetchMe();
     }
   }, [status]);
+
+  useEffect(() => {
+    const onPointerDown = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (testingMenuRef.current && !testingMenuRef.current.contains(target)) {
+        setTestingMenuOpen(false);
+      }
+      if (versioningMenuRef.current && !versioningMenuRef.current.contains(target)) {
+        setVersioningMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    return () => document.removeEventListener("mousedown", onPointerDown);
+  }, []);
 
   useEffect(() => {
     if (status !== "unauthenticated") return;
@@ -216,6 +258,123 @@ export default function Home() {
     }
   }
 
+  function validateConfigForSave(content: any, scope: "industry" | "client") {
+    const errors: string[] = [];
+    if (!content || typeof content !== "object") {
+      return ["Configuration must be a JSON object."];
+    }
+
+    const workflows = content.workflows || {};
+    const prompts = content.prompts || {};
+    const workflowKeys = Object.keys(workflows);
+
+    if (!workflowKeys.length) errors.push("At least one workflow is required.");
+    if (!content.prompts || typeof prompts !== "object") errors.push("`prompts` object is required.");
+    if (scope === "client" && !workflows.first_response) {
+      errors.push("`first_response` workflow is required for client configs.");
+    }
+    if (content.default_intent && !workflows[content.default_intent]) {
+      errors.push("`default_intent` must match an existing workflow key.");
+    }
+    if (Array.isArray(content.intents)) {
+      for (const intent of content.intents) {
+        const key = String(intent || "").trim();
+        if (!key || key === "general") continue;
+        if (!workflows[key]) errors.push(`Intent '${key}' has no matching workflow.`);
+      }
+    }
+
+    const missingPromptKeys = new Set<string>();
+    for (const workflowKey of workflowKeys) {
+      const wf = workflows[workflowKey];
+      const nodes = Array.isArray(wf?.nodes) ? wf.nodes : null;
+      const edges = Array.isArray(wf?.edges) ? wf.edges : null;
+      if (!nodes) {
+        errors.push(`Workflow '${workflowKey}' is missing a valid nodes array.`);
+        continue;
+      }
+      if (!edges) {
+        errors.push(`Workflow '${workflowKey}' is missing a valid edges array.`);
+        continue;
+      }
+
+      const nodeIds = new Set<string>();
+      for (const node of nodes) {
+        const nodeId = String(node?.id || "").trim();
+        if (!nodeId) {
+          errors.push(`Workflow '${workflowKey}' contains a node with no id.`);
+          continue;
+        }
+        if (nodeIds.has(nodeId)) {
+          errors.push(`Workflow '${workflowKey}' has duplicate node id '${nodeId}'.`);
+        }
+        nodeIds.add(nodeId);
+
+        const promptKey = String(node?.data?.promptKey || "").trim();
+        const promptKeyWithName = String(node?.data?.promptKeyWithName || "").trim();
+        if (promptKey && !String(prompts[promptKey] || "").trim()) missingPromptKeys.add(promptKey);
+        if (promptKeyWithName && !String(prompts[promptKeyWithName] || "").trim()) missingPromptKeys.add(promptKeyWithName);
+
+        if (String(node?.type || "") === "handoff") {
+          const targetWorkflow = String(node?.data?.targetWorkflow || "").trim();
+          if (!targetWorkflow) {
+            errors.push(`Workflow '${workflowKey}' has a handoff node with no target workflow.`);
+          } else if (!workflows[targetWorkflow]) {
+            errors.push(`Workflow '${workflowKey}' has handoff target '${targetWorkflow}' which does not exist.`);
+          }
+        }
+      }
+
+      for (const edge of edges) {
+        const source = String(edge?.source || "").trim();
+        const target = String(edge?.target || "").trim();
+        if (!source || !target) {
+          errors.push(`Workflow '${workflowKey}' has an edge with missing source/target.`);
+          continue;
+        }
+        if (!nodeIds.has(source) || !nodeIds.has(target)) {
+          errors.push(`Workflow '${workflowKey}' has an edge referencing unknown node(s): ${source} -> ${target}.`);
+        }
+      }
+    }
+
+    for (const key of missingPromptKeys) {
+      errors.push(`Missing prompt text for key '${key}' (referenced by workflow nodes).`);
+    }
+
+    return errors;
+  }
+
+  async function fetchCallTraces() {
+    if (!selectedIndustry || !selectedClient || selectedType !== "client") {
+      setCallTraceError("Select a client config first.");
+      setCallTraces([]);
+      return;
+    }
+    setIsLoadingCallTraces(true);
+    setCallTraceError("");
+    try {
+      const params = new URLSearchParams({
+        limit: "120",
+        industry: selectedIndustry,
+        client_id: selectedClient,
+      });
+      const res = await fetch(`/api/call-traces?${params.toString()}`, { cache: "no-store" });
+      const json = await res.json().catch(() => ({} as any));
+      if (!res.ok) {
+        setCallTraceError(String(json?.error || `Failed to load traces (${res.status})`));
+        setCallTraces([]);
+        return;
+      }
+      setCallTraces(Array.isArray(json?.traces) ? json.traces : []);
+    } catch (e) {
+      setCallTraceError(e instanceof Error ? e.message : "Failed to load traces.");
+      setCallTraces([]);
+    } finally {
+      setIsLoadingCallTraces(false);
+    }
+  }
+
   async function saveConfig() {
     if (loadError) {
       setMessage(`Error: cannot save because latest load failed (${loadError})`);
@@ -268,6 +427,11 @@ export default function Home() {
 
     try {
       const content = JSON.parse(editorContent);
+      const validationErrors = validateConfigForSave(content, selectedType);
+      if (validationErrors.length > 0) {
+        setMessage(`Error: Validation failed. ${validationErrors.slice(0, 3).join(" | ")}`);
+        return;
+      }
       console.log('[SAVE DEBUG] Saving config:', { type: selectedType, industry: selectedIndustry, client: selectedClient });
       console.log('[SAVE DEBUG] Content has workflows:', !!content.workflows);
       console.log('[SAVE DEBUG] Workflow keys:', Object.keys(content.workflows || {}));
@@ -552,6 +716,11 @@ export default function Home() {
   }, [selectedClientMappedNumber]);
 
   useEffect(() => {
+    if (!callTraceOpen) return;
+    fetchCallTraces();
+  }, [callTraceOpen, selectedIndustry, selectedClient, selectedType]);
+
+  useEffect(() => {
     if (!list || !session || initialConfigLoaded) return;
     if (selectedIndustry || isLoadingConfig) return;
 
@@ -601,6 +770,15 @@ export default function Home() {
 
     try {
       const current = new URL(window.location.origin);
+      const isLocal =
+        current.hostname === "localhost" ||
+        current.hostname === "127.0.0.1" ||
+        current.hostname === "::1";
+      // Local dev default: dashboard on :3000, voice agent on :8010.
+      if (isLocal && current.port === "3000") {
+        current.port = "8010";
+        return current.origin;
+      }
       const host = current.hostname;
       if (host.includes("app-workflow-manager")) {
         current.hostname = host.replace("app-workflow-manager", "app-voice-agent");
@@ -609,6 +787,21 @@ export default function Home() {
       return current.origin;
     } catch {
       return "";
+    }
+  }
+
+  function isLikelyDashboardWebhook(baseUrl: string) {
+    const trimmed = baseUrl.trim();
+    if (!trimmed) return false;
+    try {
+      const u = new URL(trimmed);
+      const isLocalDashboard =
+        (u.hostname === "localhost" || u.hostname === "127.0.0.1" || u.hostname === "::1") &&
+        u.port === "3000";
+      const isCloudDashboard = u.hostname.includes("app-workflow-manager");
+      return isLocalDashboard || isCloudDashboard;
+    } catch {
+      return false;
     }
   }
 
@@ -741,12 +934,14 @@ export default function Home() {
     try {
       simProcessorNodeRef.current?.disconnect();
       simSourceNodeRef.current?.disconnect();
+      simGainNodeRef.current?.disconnect();
       simMediaStreamRef.current?.getTracks().forEach((t) => t.stop());
     } catch {
       // Ignore media cleanup failures.
     }
     simProcessorNodeRef.current = null;
     simSourceNodeRef.current = null;
+    simGainNodeRef.current = null;
     simMediaStreamRef.current = null;
 
     const ctx = simAudioContextRef.current;
@@ -755,6 +950,7 @@ export default function Home() {
     }
     simAudioContextRef.current = null;
     simNextPlaybackTimeRef.current = 0;
+    simReceivedAudioRef.current = 0;
     setIsSimulatingCall(false);
     if (!silent) addSimLog("Simulation stopped");
   };
@@ -768,6 +964,10 @@ export default function Home() {
       setMessage("Error: Voice Webhook URL is required for simulation.");
       return;
     }
+    if (isLikelyDashboardWebhook(testCallWebhookBaseUrl)) {
+      setMessage("Error: Voice Webhook URL points to dashboard host. Use voice agent host (local default: http://localhost:8010).");
+      return;
+    }
 
     try {
       setSimCallLogs([]);
@@ -778,10 +978,15 @@ export default function Home() {
 
       const audioContext = new AudioContext({ sampleRate: 48000 });
       simAudioContextRef.current = audioContext;
+      await audioContext.resume();
       const sourceNode = audioContext.createMediaStreamSource(mediaStream);
       const processorNode = audioContext.createScriptProcessor(2048, 1, 1);
+      const gainNode = audioContext.createGain();
+      gainNode.gain.value = 1.25;
       simSourceNodeRef.current = sourceNode;
       simProcessorNodeRef.current = processorNode;
+      simGainNodeRef.current = gainNode;
+      addSimLog(`Audio context: ${audioContext.state}`);
 
       const workflow = selectedWorkflowKey || "first_response";
       const wsUrl = resolveWsUrl(testCallWebhookBaseUrl, selectedClient, selectedIndustry, workflow);
@@ -856,16 +1061,26 @@ export default function Home() {
           }
 
           const ctx = simAudioContextRef.current;
+          if (ctx.state !== "running") {
+            ctx.resume().catch(() => undefined);
+          }
           const buffer = ctx.createBuffer(1, pcmFloat.length, 8000);
           buffer.copyToChannel(pcmFloat, 0);
           const src = ctx.createBufferSource();
           src.buffer = buffer;
-          src.connect(ctx.destination);
+          src.connect(simGainNodeRef.current || ctx.destination);
+          if (simGainNodeRef.current) {
+            simGainNodeRef.current.connect(ctx.destination);
+          }
 
           const now = ctx.currentTime;
           const startAt = Math.max(simNextPlaybackTimeRef.current || now, now + 0.01);
           src.start(startAt);
           simNextPlaybackTimeRef.current = startAt + buffer.duration;
+          simReceivedAudioRef.current += 1;
+          if (simReceivedAudioRef.current === 1) {
+            addSimLog(`Received first audio packet (${ulawBytes.length} bytes)`);
+          }
         } catch {
           // Ignore non-json/unknown events.
         }
@@ -921,6 +1136,10 @@ export default function Home() {
     }
     if (!testCallTo.trim() || !testCallFrom.trim() || !testCallWebhookBaseUrl.trim()) {
       setMessage("Error: Test call requires To, From, and Voice Webhook URL.");
+      return;
+    }
+    if (isLikelyDashboardWebhook(testCallWebhookBaseUrl)) {
+      setMessage("Error: Voice Webhook URL points to dashboard host. Use voice agent host (local default: http://localhost:8010).");
       return;
     }
 
@@ -1344,45 +1563,105 @@ export default function Home() {
               </div>
 
               <div className="flex items-center gap-2">
-                {selectedType === 'client' && canViewHistory && (
-                  <button
-                    onClick={() => setShowHistory(!showHistory)}
-                    className={`flex items-center gap-2 px-3 py-2 text-sm rounded font-medium transition border ${showHistory ? "bg-blue-600 border-blue-500 text-white" : "border-gray-600 text-gray-400 hover:text-white"}`}
-                  >
-                    <History size={16} /> {showHistory ? "Hide History" : "History"}
-                  </button>
+                {selectedType === "client" && (
+                  <div className="relative" ref={testingMenuRef}>
+                    <button
+                      onClick={() => {
+                        setTestingMenuOpen((v) => !v);
+                        setVersioningMenuOpen(false);
+                      }}
+                      className={`px-3 py-2 text-sm rounded font-medium transition border ${testingMenuOpen ? "bg-teal-600/20 border-teal-500 text-teal-200" : "border-gray-600 text-gray-300 hover:text-white"}`}
+                    >
+                      Testing
+                    </button>
+                    {testingMenuOpen && (
+                      <div className="absolute right-0 mt-2 w-48 bg-gray-800 border border-gray-700 rounded shadow-lg z-40 overflow-hidden">
+                        {canSave && (
+                          <button
+                            onClick={() => {
+                              setTestingMenuOpen(false);
+                              setTestCallOpen(true);
+                            }}
+                            className="w-full text-left px-3 py-2 text-sm text-gray-300 hover:bg-gray-700 hover:text-white"
+                          >
+                            Start Test Call
+                          </button>
+                        )}
+                        {canSave && (
+                          <button
+                            onClick={() => {
+                              setTestingMenuOpen(false);
+                              setSimulateCallOpen(true);
+                            }}
+                            className="w-full text-left px-3 py-2 text-sm text-gray-300 hover:bg-gray-700 hover:text-white"
+                          >
+                            Simulate Call
+                          </button>
+                        )}
+                        {canViewHistory && (
+                          <button
+                            onClick={() => {
+                              setTestingMenuOpen(false);
+                              setCallTraceOpen(true);
+                            }}
+                            className="w-full text-left px-3 py-2 text-sm text-gray-300 hover:bg-gray-700 hover:text-white"
+                          >
+                            View Call Trace
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 )}
-                {selectedType === 'client' && canSave && (
-                  <button
-                    onClick={saveVariant}
-                    className="flex items-center gap-2 px-3 py-2 text-sm rounded font-medium transition border border-gray-600 text-gray-300 hover:text-white"
-                  >
-                    Save Variant
-                  </button>
-                )}
-                {selectedType === 'client' && canSave && (
-                  <button
-                    onClick={loadVariant}
-                    className="flex items-center gap-2 px-3 py-2 text-sm rounded font-medium transition border border-gray-600 text-gray-300 hover:text-white"
-                  >
-                    Load Variant
-                  </button>
-                )}
-                {selectedType === 'client' && canSave && (
-                  <button
-                    onClick={() => setTestCallOpen(true)}
-                    className="flex items-center gap-2 px-3 py-2 text-sm rounded font-medium transition border border-teal-600 text-teal-300 hover:text-white hover:bg-teal-700/30"
-                  >
-                    Test Call
-                  </button>
-                )}
-                {selectedType === 'client' && canSave && (
-                  <button
-                    onClick={() => setSimulateCallOpen(true)}
-                    className="flex items-center gap-2 px-3 py-2 text-sm rounded font-medium transition border border-cyan-600 text-cyan-300 hover:text-white hover:bg-cyan-700/30"
-                  >
-                    Simulate Call
-                  </button>
+                {selectedType === "client" && (
+                  <div className="relative" ref={versioningMenuRef}>
+                    <button
+                      onClick={() => {
+                        setVersioningMenuOpen((v) => !v);
+                        setTestingMenuOpen(false);
+                      }}
+                      className={`px-3 py-2 text-sm rounded font-medium transition border ${versioningMenuOpen ? "bg-blue-600/20 border-blue-500 text-blue-200" : "border-gray-600 text-gray-300 hover:text-white"}`}
+                    >
+                      Versioning
+                    </button>
+                    {versioningMenuOpen && (
+                      <div className="absolute right-0 mt-2 w-48 bg-gray-800 border border-gray-700 rounded shadow-lg z-40 overflow-hidden">
+                        {canViewHistory && (
+                          <button
+                            onClick={() => {
+                              setVersioningMenuOpen(false);
+                              setShowHistory((v) => !v);
+                            }}
+                            className="w-full text-left px-3 py-2 text-sm text-gray-300 hover:bg-gray-700 hover:text-white"
+                          >
+                            {showHistory ? "Hide History" : "Show History"}
+                          </button>
+                        )}
+                        {canSave && (
+                          <button
+                            onClick={async () => {
+                              setVersioningMenuOpen(false);
+                              await saveVariant();
+                            }}
+                            className="w-full text-left px-3 py-2 text-sm text-gray-300 hover:bg-gray-700 hover:text-white"
+                          >
+                            Save Variant
+                          </button>
+                        )}
+                        {canSave && (
+                          <button
+                            onClick={async () => {
+                              setVersioningMenuOpen(false);
+                              await loadVariant();
+                            }}
+                            className="w-full text-left px-3 py-2 text-sm text-gray-300 hover:bg-gray-700 hover:text-white"
+                          >
+                            Load Variant
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 )}
                 <button
                   onClick={saveConfig}
@@ -1647,6 +1926,74 @@ export default function Home() {
             <div className="flex justify-end gap-2">
               <button onClick={() => setModalOpen(false)} className="px-4 py-2 text-gray-400 hover:text-white">Cancel</button>
               <button onClick={handleModalSubmit} className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded">Confirm</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {callTraceOpen && (
+        <div className="absolute inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-gray-800 border border-gray-600 p-6 rounded shadow-xl w-[58rem] max-h-[88vh] overflow-hidden flex flex-col">
+            <h3 className="text-lg font-bold mb-4 text-white">Call Trace</h3>
+            <div className="text-xs text-gray-400 mb-3">
+              Client: <span className="text-white">{selectedClient || "-"}</span> / Industry: <span className="text-white">{selectedIndustry || "-"}</span>
+            </div>
+
+            <div className="mb-3 flex items-center justify-between">
+              <div className="text-xs text-gray-500">
+                Showing newest events first.
+              </div>
+              <button
+                onClick={fetchCallTraces}
+                disabled={isLoadingCallTraces}
+                className={`px-3 py-1.5 text-xs rounded border ${isLoadingCallTraces ? "border-gray-700 text-gray-500 cursor-not-allowed" : "border-gray-600 text-gray-300 hover:text-white hover:border-blue-500"}`}
+              >
+                {isLoadingCallTraces ? "Refreshing..." : "Refresh"}
+              </button>
+            </div>
+
+            <div className="flex-1 min-h-0 rounded border border-gray-700 bg-gray-900/60 p-2 overflow-y-auto">
+              {callTraceError && <div className="text-sm text-red-400">{callTraceError}</div>}
+              {!callTraceError && isLoadingCallTraces && (
+                <div className="text-xs text-gray-500">Loading traces...</div>
+              )}
+              {!callTraceError && !isLoadingCallTraces && callTraces.length === 0 && (
+                <div className="text-xs text-gray-500">No traces found for this client yet.</div>
+              )}
+              {!callTraceError && !isLoadingCallTraces && callTraces.length > 0 && (
+                <div className="space-y-2">
+                  {callTraces.map((row, idx) => {
+                    const tsNum = Number(row.ts || 0);
+                    const tsMs = tsNum > 1e12 ? tsNum : tsNum * 1000;
+                    return (
+                      <div key={`${row.session_id || "trace"}-${idx}`} className="rounded border border-gray-700 p-2 text-xs">
+                        <div className="flex items-center justify-between">
+                          <span className="text-amber-300">{row.event || "event"}</span>
+                          <span className="text-gray-500">{tsMs > 0 ? new Date(tsMs).toLocaleString() : "-"}</span>
+                        </div>
+                        <div className="mt-1 text-gray-300">
+                          session: {row.session_id || "-"} | intent: {row.previous_intent || "-"} → {row.intent || "-"} | node: {row.previous_node_id || "-"} → {row.current_node_id || "-"}
+                        </div>
+                        {row.input_text && <div className="mt-1 text-gray-400">in: {String(row.input_text)}</div>}
+                        {row.output_text && <div className="mt-1 text-gray-400">out: {String(row.output_text)}</div>}
+                        {row.error && <div className="mt-1 text-red-400">error: {String(row.error)}</div>}
+                        <div className="mt-1 text-gray-500">
+                          handoff: {row.handoff ? "yes" : "no"} | latency: {row.latency_ms ?? "-"} ms
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-end gap-2 mt-4">
+              <button
+                onClick={() => setCallTraceOpen(false)}
+                className="px-4 py-2 text-gray-400 hover:text-white"
+              >
+                Close
+              </button>
             </div>
           </div>
         </div>

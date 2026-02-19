@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ReactFlow, {
     MiniMap,
     Controls,
@@ -36,29 +36,48 @@ interface WorkflowVisualizerProps {
 
 import { Handle, Position } from 'reactflow';
 
+const PromptBalloon = ({ promptKey, text }: { promptKey?: string; text?: string }) => {
+    if (!text) return null;
+    return (
+        <div className="absolute top-full left-1/2 -translate-x-1/2 mt-1 z-20 w-64 rounded border border-amber-500/40 bg-amber-100/95 text-amber-950 px-2 py-1 text-[10px] text-left shadow-lg pointer-events-none">
+            {promptKey && <div className="font-semibold mb-0.5">{promptKey}</div>}
+            <div className="leading-tight">{text}</div>
+        </div>
+    );
+};
+
+const renderPromptBalloon = (data: any) => {
+    if (!data?.showPromptBalloon) return null;
+    const text = String(data?.promptBalloonText || "").trim();
+    if (!text) return null;
+    return <PromptBalloon promptKey={data?.promptBalloonKey} text={text} />;
+};
+
 // Custom Node Types
 const DefaultNode = ({ data }: { data: any }) => {
     return (
-        <div className="px-2.5 py-1.5 shadow-md rounded bg-blue-600 min-w-[125px] text-center text-[12px]">
+        <div className="relative px-2.5 py-1.5 shadow-md rounded bg-blue-600 min-w-[125px] text-center text-[12px]">
             <Handle type="target" position={Position.Top} className="w-12 !bg-gray-500" />
             <div className="font-semibold text-white">{data.label}</div>
             <Handle type="source" position={Position.Bottom} className="w-12 !bg-gray-500" />
+            {renderPromptBalloon(data)}
         </div>
     );
 };
 
 const InputNode = ({ data }: { data: any }) => {
     return (
-        <div className="px-2.5 py-1.5 shadow-md rounded bg-green-900 min-w-[125px] text-center text-[12px]">
+        <div className="relative px-2.5 py-1.5 shadow-md rounded bg-green-900 min-w-[125px] text-center text-[12px]">
             <div className="font-semibold text-green-100">{data.label}</div>
             <Handle type="source" position={Position.Bottom} className="w-12 !bg-green-400" />
+            {renderPromptBalloon(data)}
         </div>
     );
 };
 
 const HandoffNode = ({ data }: { data: any }) => {
     return (
-        <div className="px-2.5 py-1 shadow-md rounded bg-purple-900 min-w-[130px] text-center text-[12px]">
+        <div className="relative px-2.5 py-1 shadow-md rounded bg-purple-900 min-w-[130px] text-center text-[12px]">
             <Handle type="target" position={Position.Top} className="w-12 !bg-purple-500" />
             <div className="flex items-center justify-center gap-2">
                 <span className="text-[13px]">↪️</span>
@@ -66,13 +85,14 @@ const HandoffNode = ({ data }: { data: any }) => {
             </div>
             <div className="text-[10px] text-purple-300 mt-0.5">Alt-click to jump</div>
             <Handle type="source" position={Position.Bottom} className="w-12 !bg-purple-500" />
+            {renderPromptBalloon(data)}
         </div>
     );
 };
 
 const ActionNode = ({ data }: { data: any }) => {
     return (
-        <div className="px-2.5 py-1.5 shadow-md rounded bg-blue-900 min-w-[125px] text-center text-[12px]">
+        <div className="relative px-2.5 py-1.5 shadow-md rounded bg-blue-900 min-w-[125px] text-center text-[12px]">
             <Handle type="target" position={Position.Top} className=" !bg-blue-400" />
             <div className="flex items-center justify-center gap-2">
                 <span className="text-[13px]">⚡</span>
@@ -82,6 +102,7 @@ const ActionNode = ({ data }: { data: any }) => {
                 {data.actionType?.toUpperCase() || 'NO ACTION SET'}
             </div>
             <Handle type="source" position={Position.Bottom} className=" !bg-blue-400" />
+            {renderPromptBalloon(data)}
         </div>
     );
 };
@@ -134,6 +155,7 @@ function WorkflowVisualizerInner({
     const [newPromptKey, setNewPromptKey] = useState<string>("");
     const [newPromptText, setNewPromptText] = useState<string>("");
     const [promptError, setPromptError] = useState<string>("");
+    const [showPromptBalloons, setShowPromptBalloons] = useState(false);
 
     // Modal State
     const [showIntentModal, setShowIntentModal] = useState(false);
@@ -922,6 +944,23 @@ function WorkflowVisualizerInner({
     const selectedNode = nodes.find(n => n.id === selectedNodeId);
     const promptKeyUsageCount = selectedNode?.data?.promptKey ? countNodesUsingPromptKey(selectedNode.data.promptKey) : 0;
     const promptKeyWithNameUsageCount = selectedNode?.data?.promptKeyWithName ? countNodesUsingPromptKey(selectedNode.data.promptKeyWithName) : 0;
+    const nodesForRender = useMemo(() => {
+        if (!showPromptBalloons) return nodes;
+        const prompts = jsonContent?.prompts || {};
+        return nodes.map((node: any) => {
+            const promptKey = String(node?.data?.promptKey || node?.data?.promptKeyWithName || "").trim();
+            const promptText = promptKey ? String(prompts?.[promptKey] || "").trim() : "";
+            return {
+                ...node,
+                data: {
+                    ...node.data,
+                    showPromptBalloon: true,
+                    promptBalloonKey: promptKey,
+                    promptBalloonText: promptText
+                }
+            };
+        });
+    }, [nodes, showPromptBalloons, jsonContent?.prompts]);
 
     return (
         <div className="h-full w-full bg-gray-900 border border-gray-700 rounded relative flex flex-col">
@@ -1055,8 +1094,20 @@ function WorkflowVisualizerInner({
 
                 {/* Main Canvas */}
                 <div className="flex-1 h-full relative" onDragOver={onCanvasDragOver} onDrop={onCanvasDrop} onDragLeave={onCanvasDragLeave}>
+                    <div className="absolute top-2 left-2 z-10">
+                        <button
+                            onClick={() => setShowPromptBalloons((v) => !v)}
+                            className={`px-3 py-1 rounded text-xs border shadow ${showPromptBalloons
+                                    ? "bg-amber-600/20 border-amber-500 text-amber-200"
+                                    : "bg-gray-800/90 border-gray-600 text-gray-300 hover:text-white"
+                                }`}
+                            title="Toggle prompt text balloons near workflow nodes"
+                        >
+                            Prompt Balloons: {showPromptBalloons ? "On" : "Off"}
+                        </button>
+                    </div>
                     <ReactFlow
-                        nodes={nodes}
+                        nodes={nodesForRender}
                         edges={renderEdges}
                         nodeTypes={nodeTypes}
                         onNodesChange={onNodesChange}
@@ -1731,3 +1782,4 @@ function WorkflowVisualizerInner({
         </div>
     );
 }
+

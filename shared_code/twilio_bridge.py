@@ -9,6 +9,7 @@ import time
 import re
 import azure.cognitiveservices.speech as speechsdk
 from shared_code.agent.agent_engine import run_agent_step
+from shared_code.utils.call_trace import append_call_trace
 
 logger = logging.getLogger("twilio-bridge")
 
@@ -260,6 +261,19 @@ class TwilioBridge:
                             }))
                         except Exception:
                             pass
+                    append_call_trace({
+                        "event": "session_start",
+                        "session_id": self.session_id,
+                        "stream_sid": self.stream_sid,
+                        "phone_number": from_number,
+                        "called_number": called_number,
+                        "client_id": session.get("client_id"),
+                        "industry": session.get("industry"),
+                        "intent": session.get("intent"),
+                        "current_node_id": session.get("current_node_id"),
+                        "test_mode": bool(self._emit_sim_events),
+                        "test_workflow": test_workflow or "",
+                    })
 
                     # Warm Azure TTS cache for common prompts to reduce latency
                     if self.tts_provider in ("azure", "azure_neural", "azure_tts"):
@@ -327,16 +341,31 @@ class TwilioBridge:
         # 1. Get Agent Response
         logger.info(f"Processing text: {text} | Session: {self.session_id}")
         prev_intent = None
+        prev_node_id = None
         try:
             from shared_code.utils.session import load_session
-            prev_intent = (load_session(self.session_id) or {}).get("intent")
+            prev_session = load_session(self.session_id) or {}
+            prev_intent = prev_session.get("intent")
+            prev_node_id = prev_session.get("current_node_id")
         except Exception:
             prev_intent = None
+            prev_node_id = None
+        started_at = time.time()
         try:
             response = run_agent_step(self.session_id, text)
         except Exception as e:
             import traceback
             logger.error(f"CRITICAL AGENT ERROR: {e}\n{traceback.format_exc()}")
+            append_call_trace({
+                "event": "turn_error",
+                "session_id": self.session_id,
+                "stream_sid": self.stream_sid,
+                "client_id": None,
+                "industry": None,
+                "input_text": text,
+                "error": str(e),
+                "latency_ms": int((time.time() - started_at) * 1000),
+            })
             return
 
         reply_text = response.get("prompt")
@@ -365,6 +394,26 @@ class TwilioBridge:
                 }))
             except Exception:
                 pass
+
+        next_session = response.get("session") if isinstance(response, dict) else {}
+        next_intent = (next_session or {}).get("intent")
+        next_node_id = (next_session or {}).get("current_node_id")
+        append_call_trace({
+            "event": "turn",
+            "session_id": self.session_id,
+            "stream_sid": self.stream_sid,
+            "client_id": (next_session or {}).get("client_id"),
+            "industry": (next_session or {}).get("industry"),
+            "input_text": text,
+            "output_text": reply_text,
+            "previous_intent": prev_intent,
+            "intent": next_intent,
+            "previous_node_id": prev_node_id,
+            "current_node_id": next_node_id,
+            "handoff": bool(next_intent and prev_intent and next_intent != prev_intent),
+            "latency_ms": int((time.time() - started_at) * 1000),
+            "test_mode": bool(self._emit_sim_events),
+        })
         
         # Check for Hangup Signal
         should_hangup = False
@@ -386,8 +435,11 @@ class TwilioBridge:
                     if not used:
                         await self._stream_elevenlabs_tts_optimized(reply_text)
                 else:
-                    # Use optimized stream with Turbo model
-                    await self._stream_elevenlabs_tts_optimized(reply_text)
+                    # Use optimized stream with Turbo model; fall back to Azure if ElevenLabs yields no audio.
+                    used = await self._stream_elevenlabs_tts_optimized(reply_text)
+                    if not used:
+                        logger.warning("ElevenLabs produced no audio, attempting Azure TTS fallback.")
+                        await self._stream_azure_tts(reply_text)
             finally:
                 self._speaking = False
             
@@ -407,6 +459,7 @@ class TwilioBridge:
         }
         
         try:
+            sent_audio = False
             async with websockets.connect(url, extra_headers=header) as ws:
                 await ws.send(json.dumps({
                     "text": text,
@@ -423,11 +476,14 @@ class TwilioBridge:
                             break
                         # Direct u-law chunks from ElevenLabs
                         await self._send_media_to_twilio(audio_b64)
+                        sent_audio = True
                         
                     if data.get("isFinal"):
                         break
+            return sent_audio
         except Exception as e:
             logger.error(f"ElevenLabs TTS Error: {e}")
+            return False
 
     async def _stream_azure_tts(self, text, send_audio: bool = True):
         speech_region = self.azure_speech_region or self.speech_region
