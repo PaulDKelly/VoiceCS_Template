@@ -204,7 +204,13 @@ def _process_node(node_id: str, nodes: list, edges: list, session: dict, config:
     ):
         prompt_key = prompt_key_with_name
     if prompt_key:
-        prompt = config.get("prompts", {}).get(prompt_key, f"Missing prompt: {prompt_key}")
+        prompt_value = config.get("prompts", {}).get(prompt_key)
+        if isinstance(prompt_value, str) and prompt_value.strip() and prompt_value.strip() != "...":
+            prompt = prompt_value
+        else:
+            # Never speak technical/missing prompt keys aloud in production calls.
+            print(f"WARN: Missing or placeholder prompt for key '{prompt_key}'", flush=True)
+            prompt = "Could you tell me a bit more so I can help you with this?"
     else:
         prompt = node.get("data", {}).get("label", "Next step...")
 
@@ -787,23 +793,202 @@ def _execute_supabase_rest_query(
     return None
 
 
+def _resolve_knowledge_connection(action_config: dict, config: dict) -> dict:
+    connections = config.get("knowledge_base_connections") or {}
+    conn_ref = action_config.get("kb_connection_ref")
+    base = {}
+    if conn_ref and isinstance(connections, dict):
+        candidate = connections.get(conn_ref)
+        if isinstance(candidate, dict):
+            base = candidate
+
+    merged = dict(base)
+    for field in [
+        "type",
+        "endpoint", "index_name", "api_version",
+        "api_key", "api_key_env",
+        "supabase_url", "supabase_key", "supabase_key_env",
+        "http_method", "body_template",
+        "content_field", "title_field",
+    ]:
+        if action_config.get(field) not in (None, ""):
+            merged[field] = action_config.get(field)
+    return merged
+
+
 def _execute_knowledge_search(action_config: dict, session: dict, config: dict):
     import requests
 
-    endpoint = str(action_config.get("endpoint") or "").strip()
-    index_name = str(action_config.get("index_name") or "").strip()
-    api_version = str(action_config.get("api_version") or "2023-11-01").strip()
+    kb_cfg = _resolve_knowledge_connection(action_config, config)
+    kb_type = str(kb_cfg.get("type") or "").strip().lower()
+    if not kb_type:
+        kb_type = "supabase_rest" if kb_cfg.get("supabase_url") else "azure_search"
+
+    endpoint = str(kb_cfg.get("endpoint") or "").strip()
+    index_name = str(kb_cfg.get("index_name") or "").strip()
+    api_version = str(kb_cfg.get("api_version") or "2023-11-01").strip()
     query_template = str(action_config.get("query_template") or "{_last_user_input}").strip()
     top_k = int(action_config.get("top_k") or 3)
     timeout_seconds = float(action_config.get("timeout_seconds") or 6)
 
-    content_field = str(action_config.get("content_field") or "content").strip()
-    title_field = str(action_config.get("title_field") or "title").strip()
+    content_field = str(kb_cfg.get("content_field") or "content").strip()
+    title_field = str(kb_cfg.get("title_field") or "title").strip()
     result_var = str(action_config.get("result_var") or "kb").strip()
 
     no_results_prompt = action_config.get("no_results_prompt")
     error_prompt = action_config.get("error_prompt")
     respond_immediately = bool(action_config.get("respond_immediately"))
+
+    query_text = _replace_vars(query_template, session, config, url_encode=False).strip()
+    if not query_text:
+        query_text = str(session.get("_last_user_input") or "").strip()
+
+    if kb_type == "supabase_rest":
+        base_url = (
+            kb_cfg.get("supabase_url")
+            or kb_cfg.get("endpoint")
+            or ""
+        ).strip()
+        endpoint_template = (
+            action_config.get("endpoint")
+            or kb_cfg.get("endpoint_path")
+            or kb_cfg.get("query_template")
+            or kb_cfg.get("endpoint")
+            or ""
+        )
+        if not base_url:
+            err_text = "Knowledge search (Supabase) requires supabase_url."
+            session[f"{result_var}_error"] = err_text
+            if error_prompt:
+                return {"prompt": error_prompt}
+            return None
+        if not endpoint_template:
+            err_text = "Knowledge search (Supabase) requires endpoint path (e.g. /rest/v1/rpc/match_documents)."
+            session[f"{result_var}_error"] = err_text
+            if error_prompt:
+                return {"prompt": error_prompt}
+            return None
+
+        key = kb_cfg.get("supabase_key") or kb_cfg.get("api_key")
+        if not key and kb_cfg.get("supabase_key_env"):
+            key = os.getenv(str(kb_cfg.get("supabase_key_env")))
+        if not key and kb_cfg.get("api_key_env"):
+            key = os.getenv(str(kb_cfg.get("api_key_env")))
+        if not key:
+            err_text = "Knowledge search (Supabase) API key is missing (supabase_key/supabase_key_env)."
+            session[f"{result_var}_error"] = err_text
+            if error_prompt:
+                return {"prompt": error_prompt}
+            return None
+
+        endpoint = _replace_vars(str(endpoint_template), session, config, url_encode=True)
+        if endpoint.startswith("http://") or endpoint.startswith("https://"):
+            url = endpoint
+        else:
+            url = f"{base_url.rstrip('/')}/{endpoint.lstrip('/')}"
+
+        method = str(action_config.get("http_method") or kb_cfg.get("http_method") or "POST").upper()
+        body_template = action_config.get("body_template") or kb_cfg.get("body_template")
+        body = None
+        if body_template:
+            rendered = _replace_vars(str(body_template), session, config, url_encode=False)
+            try:
+                body = json.loads(rendered)
+            except Exception:
+                body = {"query": query_text, "raw": rendered}
+        else:
+            body = {"query_text": query_text, "match_count": top_k}
+
+        headers = {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "apikey": str(key),
+            "Authorization": f"Bearer {key}",
+        }
+        custom_headers = action_config.get("headers")
+        if isinstance(custom_headers, dict):
+            for k, v in custom_headers.items():
+                headers[str(k)] = str(v)
+
+        try:
+            res = requests.request(
+                method=method,
+                url=url,
+                headers=headers,
+                json=body if method in ("POST", "PUT", "PATCH", "DELETE") else None,
+                timeout=timeout_seconds,
+            )
+            if not res.ok:
+                raise RuntimeError(f"Knowledge search (Supabase) failed ({res.status_code}): {res.text[:400]}")
+
+            payload = res.json()
+            if isinstance(payload, list):
+                docs = payload
+            elif isinstance(payload, dict) and isinstance(payload.get("data"), list):
+                docs = payload.get("data")
+            elif isinstance(payload, dict) and isinstance(payload.get("value"), list):
+                docs = payload.get("value")
+            elif isinstance(payload, dict):
+                docs = [payload]
+            else:
+                docs = []
+
+            hits = []
+            for d in docs[: max(top_k, 1)]:
+                if not isinstance(d, dict):
+                    continue
+                title = d.get(title_field) or d.get("title") or d.get("name") or d.get("heading") or ""
+                content = (
+                    d.get(content_field)
+                    or d.get("content")
+                    or d.get("text")
+                    or d.get("chunk")
+                    or d.get("body")
+                    or d.get("summary")
+                    or ""
+                )
+                score = d.get("score")
+                if score is None:
+                    score = d.get("similarity")
+                if score is None:
+                    score = d.get("@search.score")
+                hits.append({
+                    "title": str(title or ""),
+                    "content": str(content or ""),
+                    "score": score,
+                    "raw": d,
+                })
+
+            summary_lines = []
+            for h in hits:
+                if h["title"] and h["content"]:
+                    summary_lines.append(f"{h['title']}: {h['content']}")
+                elif h["content"]:
+                    summary_lines.append(h["content"])
+                elif h["title"]:
+                    summary_lines.append(h["title"])
+            summary = " ".join([s.strip() for s in summary_lines if s.strip()][:top_k]).strip()
+
+            session[result_var] = {
+                "query": query_text,
+                "summary": summary,
+                "hits": hits,
+                "provider": "supabase_rest",
+            }
+            print(f"DEBUG: Knowledge search (Supabase) stored result in '{result_var}' ({len(hits)} hits)", flush=True)
+
+            if not hits and no_results_prompt:
+                return {"prompt": str(no_results_prompt)}
+            if respond_immediately and summary:
+                return {"prompt": summary}
+            return None
+        except Exception as e:
+            err_text = f"{type(e).__name__}: {e}"
+            session[f"{result_var}_error"] = err_text
+            print(f"ERROR: Knowledge search action failed: {err_text}", flush=True)
+            if error_prompt:
+                return {"prompt": str(error_prompt)}
+            return None
 
     if not endpoint or not index_name:
         err_text = "Knowledge search requires endpoint and index_name."
@@ -812,9 +997,9 @@ def _execute_knowledge_search(action_config: dict, session: dict, config: dict):
             return {"prompt": error_prompt}
         return None
 
-    api_key = action_config.get("api_key")
-    if not api_key and action_config.get("api_key_env"):
-        api_key = os.getenv(str(action_config.get("api_key_env")))
+    api_key = kb_cfg.get("api_key")
+    if not api_key and kb_cfg.get("api_key_env"):
+        api_key = os.getenv(str(kb_cfg.get("api_key_env")))
 
     if not api_key:
         err_text = "Knowledge search API key is missing (api_key or api_key_env)."
@@ -822,10 +1007,6 @@ def _execute_knowledge_search(action_config: dict, session: dict, config: dict):
         if error_prompt:
             return {"prompt": error_prompt}
         return None
-
-    query_text = _replace_vars(query_template, session, config, url_encode=False).strip()
-    if not query_text:
-        query_text = str(session.get("_last_user_input") or "").strip()
 
     base = endpoint.rstrip("/")
     url = f"{base}/indexes/{index_name}/docs/search?api-version={api_version}"

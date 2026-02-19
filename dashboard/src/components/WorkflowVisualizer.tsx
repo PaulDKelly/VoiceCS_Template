@@ -160,6 +160,7 @@ function WorkflowVisualizerInner({
     // Modal State
     const [showIntentModal, setShowIntentModal] = useState(false);
     const [newIntentName, setNewIntentName] = useState("");
+    const [newWorkflowTemplateKey, setNewWorkflowTemplateKey] = useState("");
 
     const [internalSelectedWorkflowKey, setInternalSelectedWorkflowKey] = useState<string | null>(null);
     const selectedWorkflowKey = selectedWorkflowKeyProp ?? internalSelectedWorkflowKey;
@@ -877,11 +878,18 @@ function WorkflowVisualizerInner({
 
         const updatedWorkflows = { ...(jsonContent.workflows || {}) };
 
-        // 2. Try to copy from defaults
-        if (industryDefaults?.workflows && industryDefaults.workflows[name]) {
+        // 2. Try to copy from selected existing workflow template
+        const selectedTemplate =
+            (newWorkflowTemplateKey && updatedWorkflows[newWorkflowTemplateKey])
+            || (newWorkflowTemplateKey && industryDefaults?.workflows?.[newWorkflowTemplateKey]);
+        if (selectedTemplate) {
+            updatedWorkflows[name] = cloneWorkflow(selectedTemplate);
+        }
+        // 3. Try to copy from defaults
+        else if (industryDefaults?.workflows && industryDefaults.workflows[name]) {
             updatedWorkflows[name] = industryDefaults.workflows[name];
         } else {
-            // 3. Create fresh
+            // 4. Create fresh
             updatedWorkflows[name] = {
                 nodes: [{ id: '1', position: { x: 250, y: 50 }, data: { label: `Start ${name}` }, type: 'custom_input' }],
                 edges: []
@@ -912,16 +920,22 @@ function WorkflowVisualizerInner({
         setSelectedWorkflowKey(name);
         setShowIntentModal(false);
         setNewIntentName("");
+        setNewWorkflowTemplateKey("");
     };
 
     const routingRules = (jsonContent.intent_routing_rules || {}) as Record<string, { enabled?: boolean }>;
     const intentKeys = (jsonContent.intents || []).filter((k: string) => k !== 'general' && routingRules?.[k]?.enabled !== false);
     const contentWorkflows = jsonContent.workflows ? Object.keys(jsonContent.workflows).filter(k => k !== 'general') : [];
-    const defaultWorkflows = (!isClientConfig && industryDefaults?.workflows)
+    const defaultWorkflows = industryDefaults?.workflows
         ? Object.keys(industryDefaults.workflows).filter(k => k !== 'general')
         : [];
     const workflowKeys = Array.from(new Set([
         ...(intentKeys.length ? intentKeys : contentWorkflows),
+        ...defaultWorkflows
+    ]));
+    const templateWorkflowOptions = Array.from(new Set([
+        ...workflowKeys,
+        ...contentWorkflows,
         ...defaultWorkflows
     ]));
     const promptKeysAll = jsonContent.prompts ? Object.keys(jsonContent.prompts) : [];
@@ -1000,7 +1014,11 @@ function WorkflowVisualizerInner({
 
                     {/* Add New Workflow Button */}
                     <button
-                        onClick={() => setShowIntentModal(true)}
+                        onClick={() => {
+                            setNewIntentName("");
+                            setNewWorkflowTemplateKey("");
+                            setShowIntentModal(true);
+                        }}
                         className="px-3 py-2 text-gray-500 hover:text-green-400"
                         title="Add Intent / Workflow"
                     >
@@ -1046,9 +1064,27 @@ function WorkflowVisualizerInner({
                             onChange={(e) => setNewIntentName(e.target.value)}
                         />
 
+                        <label className="block text-xs uppercase text-gray-400 font-bold mb-2">Start From (Optional)</label>
+                        <select
+                            className="w-full bg-gray-900 border border-gray-600 rounded p-2 text-white mb-4 focus:border-blue-500 outline-none"
+                            value={newWorkflowTemplateKey}
+                            onChange={(e) => setNewWorkflowTemplateKey(e.target.value)}
+                        >
+                            <option value="">Blank / industry default for this intent</option>
+                            {templateWorkflowOptions.map((key) => (
+                                <option key={key} value={key}>
+                                    {key}
+                                </option>
+                            ))}
+                        </select>
+
                         <div className="flex justify-end gap-2">
                             <button
-                                onClick={() => setShowIntentModal(false)}
+                                onClick={() => {
+                                    setShowIntentModal(false);
+                                    setNewIntentName("");
+                                    setNewWorkflowTemplateKey("");
+                                }}
                                 className="px-4 py-2 text-gray-400 hover:text-white text-sm"
                             >
                                 Cancel
@@ -1382,41 +1418,107 @@ function WorkflowVisualizerInner({
                                                 Recommended: keep endpoint/index/key in Client Config and only set query behavior on node.
                                             </div>
                                         </div>
-                                        <input
-                                            type="text"
-                                            className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs"
-                                            placeholder="Search Endpoint, e.g. https://<service>.search.windows.net"
-                                            value={selectedNode.data.actionConfig?.endpoint || ""}
-                                            onChange={(e) => handleActionConfigChange("endpoint", e.target.value)}
-                                        />
-                                        <input
-                                            type="text"
-                                            className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs"
-                                            placeholder="Index Name"
-                                            value={selectedNode.data.actionConfig?.index_name || ""}
-                                            onChange={(e) => handleActionConfigChange("index_name", e.target.value)}
-                                        />
-                                        <input
-                                            type="text"
-                                            className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs"
-                                            placeholder="API Version (default 2023-11-01)"
-                                            value={selectedNode.data.actionConfig?.api_version || ""}
-                                            onChange={(e) => handleActionConfigChange("api_version", e.target.value)}
-                                        />
-                                        <input
-                                            type="text"
-                                            className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs"
-                                            placeholder="API Key Env Var (recommended), e.g. AZURE_SEARCH_API_KEY"
-                                            value={selectedNode.data.actionConfig?.api_key_env || ""}
-                                            onChange={(e) => handleActionConfigChange("api_key_env", e.target.value)}
-                                        />
-                                        <input
-                                            type="text"
-                                            className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs"
-                                            placeholder="API Key (optional, avoid for production)"
-                                            value={selectedNode.data.actionConfig?.api_key || ""}
-                                            onChange={(e) => handleActionConfigChange("api_key", e.target.value)}
-                                        />
+                                        <label className="text-[10px] text-gray-400 mb-1 block">KB Provider (optional override)</label>
+                                        <select
+                                            className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs focus:border-blue-500 outline-none"
+                                            value={selectedNode.data.actionConfig?.type || ""}
+                                            onChange={(e) => handleActionConfigChange("type", e.target.value)}
+                                        >
+                                            <option value="">-- From Connection / Auto --</option>
+                                            <option value="azure_search">Azure AI Search</option>
+                                            <option value="supabase_rest">Supabase REST/RPC</option>
+                                        </select>
+                                        {(
+                                            selectedNode.data.actionConfig?.type === "supabase_rest" ||
+                                            (
+                                                !selectedNode.data.actionConfig?.type &&
+                                                selectedNode.data.actionConfig?.kb_connection_ref &&
+                                                jsonContent.knowledge_base_connections?.[selectedNode.data.actionConfig.kb_connection_ref]?.type === "supabase_rest"
+                                            )
+                                        ) ? (
+                                            <>
+                                                <input
+                                                    type="text"
+                                                    className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs"
+                                                    placeholder="Supabase URL, e.g. https://<project-ref>.supabase.co"
+                                                    value={selectedNode.data.actionConfig?.supabase_url || ""}
+                                                    onChange={(e) => handleActionConfigChange("supabase_url", e.target.value)}
+                                                />
+                                                <input
+                                                    type="text"
+                                                    className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs"
+                                                    placeholder="Endpoint Path, e.g. /rest/v1/rpc/match_documents"
+                                                    value={selectedNode.data.actionConfig?.endpoint || ""}
+                                                    onChange={(e) => handleActionConfigChange("endpoint", e.target.value)}
+                                                />
+                                                <input
+                                                    type="text"
+                                                    className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs"
+                                                    placeholder="HTTP Method (default POST)"
+                                                    value={selectedNode.data.actionConfig?.http_method || ""}
+                                                    onChange={(e) => handleActionConfigChange("http_method", e.target.value)}
+                                                />
+                                                <input
+                                                    type="text"
+                                                    className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs"
+                                                    placeholder="Supabase Key Env Var, e.g. SUPABASE_SERVICE_ROLE_KEY"
+                                                    value={selectedNode.data.actionConfig?.supabase_key_env || ""}
+                                                    onChange={(e) => handleActionConfigChange("supabase_key_env", e.target.value)}
+                                                />
+                                                <input
+                                                    type="text"
+                                                    className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs"
+                                                    placeholder="Supabase Key (optional, avoid in production)"
+                                                    value={selectedNode.data.actionConfig?.supabase_key || ""}
+                                                    onChange={(e) => handleActionConfigChange("supabase_key", e.target.value)}
+                                                />
+                                                <textarea
+                                                    className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs"
+                                                    placeholder='Body Template JSON (optional), e.g. {"query_text":"{_last_user_input}","match_count":3}'
+                                                    rows={3}
+                                                    value={selectedNode.data.actionConfig?.body_template || ""}
+                                                    onChange={(e) => handleActionConfigChange("body_template", e.target.value)}
+                                                />
+                                            </>
+                                        ) : (
+                                            <>
+                                                <input
+                                                    type="text"
+                                                    className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs"
+                                                    placeholder="Search Endpoint, e.g. https://<service>.search.windows.net"
+                                                    value={selectedNode.data.actionConfig?.endpoint || ""}
+                                                    onChange={(e) => handleActionConfigChange("endpoint", e.target.value)}
+                                                />
+                                                <input
+                                                    type="text"
+                                                    className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs"
+                                                    placeholder="Index Name"
+                                                    value={selectedNode.data.actionConfig?.index_name || ""}
+                                                    onChange={(e) => handleActionConfigChange("index_name", e.target.value)}
+                                                />
+                                                <input
+                                                    type="text"
+                                                    className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs"
+                                                    placeholder="API Version (default 2023-11-01)"
+                                                    value={selectedNode.data.actionConfig?.api_version || ""}
+                                                    onChange={(e) => handleActionConfigChange("api_version", e.target.value)}
+                                                />
+                                                <input
+                                                    type="text"
+                                                    className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs"
+                                                    placeholder="API Key Env Var (recommended), e.g. AZURE_SEARCH_API_KEY"
+                                                    value={selectedNode.data.actionConfig?.api_key_env || ""}
+                                                    onChange={(e) => handleActionConfigChange("api_key_env", e.target.value)}
+                                                />
+                                                <input
+                                                    type="text"
+                                                    className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs"
+                                                    placeholder="API Key (optional, avoid for production)"
+                                                    value={selectedNode.data.actionConfig?.api_key || ""}
+                                                    onChange={(e) => handleActionConfigChange("api_key", e.target.value)}
+                                                />
+                                            </>
+                                        )}
                                         <textarea
                                             className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs"
                                             placeholder="Query Template, e.g. {engineer_name} contact details"

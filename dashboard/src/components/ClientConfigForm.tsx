@@ -57,6 +57,22 @@ type ClientConfig = {
         supabase_key?: string;
         supabase_key_env?: string;
     }>;
+    knowledge_base_connections?: Record<string, {
+        type?: string;
+        endpoint?: string;
+        endpoint_path?: string;
+        index_name?: string;
+        api_version?: string;
+        api_key?: string;
+        api_key_env?: string;
+        supabase_url?: string;
+        supabase_key?: string;
+        supabase_key_env?: string;
+        http_method?: string;
+        body_template?: string;
+        content_field?: string;
+        title_field?: string;
+    }>;
     [key: string]: any;
 };
 
@@ -1372,6 +1388,256 @@ export default function ClientConfigForm({ jsonContent, onChange, assignedPhoneN
                                 className="px-3 py-2 rounded text-xs bg-blue-700 hover:bg-blue-600 text-white"
                             >
                                 + Add Database Connection
+                            </button>
+                        </div>
+                    </div>
+                </section>
+
+                <section className="bg-gray-800 rounded-lg p-6 border border-gray-700">
+                    <h3 className="text-lg font-semibold text-blue-400 mb-4">Knowledge Base Connections</h3>
+                    <p className="text-sm text-gray-400 mb-4">
+                        Create reusable KB/search connections for Knowledge Search action nodes.
+                    </p>
+                    <div className="space-y-4">
+                        {Object.entries(config.knowledge_base_connections || {}).map(([connKey, conn]: any) => (
+                            <div key={`kb-conn-${connKey}`} className="p-4 bg-gray-900 rounded border border-gray-700">
+                                <div className="flex items-center justify-between mb-3">
+                                    <div className="text-sm font-semibold text-white">{connKey}</div>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            const next = { ...(config.knowledge_base_connections || {}) };
+                                            delete next[connKey];
+                                            handleChange("knowledge_base_connections", next);
+                                        }}
+                                        className="text-xs px-2 py-1 rounded bg-red-800 hover:bg-red-700 text-white"
+                                    >
+                                        Remove
+                                    </button>
+                                </div>
+                                <div className="grid grid-cols-2 gap-3">
+                                    <div>
+                                        <label className="block text-xs text-gray-400 mb-1">Provider</label>
+                                        <select
+                                            value={conn.type || "azure_search"}
+                                            onChange={(e) => {
+                                                const next = {
+                                                    ...(config.knowledge_base_connections || {}),
+                                                    [connKey]: { ...(conn || {}), type: e.target.value }
+                                                };
+                                                handleChange("knowledge_base_connections", next);
+                                            }}
+                                            className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-white text-sm"
+                                        >
+                                            <option value="azure_search">Azure AI Search</option>
+                                            <option value="supabase_rest">Supabase REST/RPC</option>
+                                        </select>
+                                    </div>
+
+                                    {(conn.type || "azure_search") === "supabase_rest" ? (
+                                        <>
+                                            <div>
+                                                <label className="block text-xs text-gray-400 mb-1">Supabase URL</label>
+                                                <input
+                                                    type="text"
+                                                    value={conn.supabase_url || ""}
+                                                    onChange={(e) => {
+                                                        const next = {
+                                                            ...(config.knowledge_base_connections || {}),
+                                                            [connKey]: { ...(conn || {}), supabase_url: e.target.value }
+                                                        };
+                                                        handleChange("knowledge_base_connections", next);
+                                                    }}
+                                                    className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-white text-sm"
+                                                    placeholder="https://<project-ref>.supabase.co"
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="block text-xs text-gray-400 mb-1">Endpoint Path</label>
+                                                <input
+                                                    type="text"
+                                                    value={conn.endpoint_path || ""}
+                                                    onChange={(e) => {
+                                                        const next = {
+                                                            ...(config.knowledge_base_connections || {}),
+                                                            [connKey]: { ...(conn || {}), endpoint_path: e.target.value }
+                                                        };
+                                                        handleChange("knowledge_base_connections", next);
+                                                    }}
+                                                    className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-white text-sm"
+                                                    placeholder="/rest/v1/rpc/match_documents"
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="block text-xs text-gray-400 mb-1">HTTP Method</label>
+                                                <input
+                                                    type="text"
+                                                    value={conn.http_method || ""}
+                                                    onChange={(e) => {
+                                                        const next = {
+                                                            ...(config.knowledge_base_connections || {}),
+                                                            [connKey]: { ...(conn || {}), http_method: e.target.value }
+                                                        };
+                                                        handleChange("knowledge_base_connections", next);
+                                                    }}
+                                                    className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-white text-sm"
+                                                    placeholder="POST"
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="block text-xs text-gray-400 mb-1">Supabase Key Env Var</label>
+                                                <input
+                                                    type="text"
+                                                    value={conn.supabase_key_env || ""}
+                                                    onChange={(e) => {
+                                                        const next = {
+                                                            ...(config.knowledge_base_connections || {}),
+                                                            [connKey]: { ...(conn || {}), supabase_key_env: e.target.value }
+                                                        };
+                                                        handleChange("knowledge_base_connections", next);
+                                                    }}
+                                                    className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-white text-sm"
+                                                    placeholder="SUPABASE_SERVICE_ROLE_KEY"
+                                                />
+                                            </div>
+                                            <div className="col-span-2">
+                                                <label className="block text-xs text-gray-400 mb-1">Supabase Key (optional)</label>
+                                                <input
+                                                    type="password"
+                                                    value={conn.supabase_key || ""}
+                                                    onChange={(e) => {
+                                                        const next = {
+                                                            ...(config.knowledge_base_connections || {}),
+                                                            [connKey]: { ...(conn || {}), supabase_key: e.target.value }
+                                                        };
+                                                        handleChange("knowledge_base_connections", next);
+                                                    }}
+                                                    className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-white text-sm"
+                                                    placeholder="Prefer env var in production"
+                                                />
+                                            </div>
+                                            <div className="col-span-2">
+                                                <label className="block text-xs text-gray-400 mb-1">Body Template (optional JSON)</label>
+                                                <textarea
+                                                    value={conn.body_template || ""}
+                                                    onChange={(e) => {
+                                                        const next = {
+                                                            ...(config.knowledge_base_connections || {}),
+                                                            [connKey]: { ...(conn || {}), body_template: e.target.value }
+                                                        };
+                                                        handleChange("knowledge_base_connections", next);
+                                                    }}
+                                                    className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-white text-sm"
+                                                    placeholder='{"query_text":"{_last_user_input}","match_count":3}'
+                                                    rows={2}
+                                                />
+                                            </div>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <div>
+                                                <label className="block text-xs text-gray-400 mb-1">Endpoint</label>
+                                                <input
+                                                    type="text"
+                                                    value={conn.endpoint || ""}
+                                                    onChange={(e) => {
+                                                        const next = {
+                                                            ...(config.knowledge_base_connections || {}),
+                                                            [connKey]: { ...(conn || {}), endpoint: e.target.value }
+                                                        };
+                                                        handleChange("knowledge_base_connections", next);
+                                                    }}
+                                                    className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-white text-sm"
+                                                    placeholder="https://<service>.search.windows.net"
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="block text-xs text-gray-400 mb-1">Index Name</label>
+                                                <input
+                                                    type="text"
+                                                    value={conn.index_name || ""}
+                                                    onChange={(e) => {
+                                                        const next = {
+                                                            ...(config.knowledge_base_connections || {}),
+                                                            [connKey]: { ...(conn || {}), index_name: e.target.value }
+                                                        };
+                                                        handleChange("knowledge_base_connections", next);
+                                                    }}
+                                                    className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-white text-sm"
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="block text-xs text-gray-400 mb-1">API Version</label>
+                                                <input
+                                                    type="text"
+                                                    value={conn.api_version || ""}
+                                                    onChange={(e) => {
+                                                        const next = {
+                                                            ...(config.knowledge_base_connections || {}),
+                                                            [connKey]: { ...(conn || {}), api_version: e.target.value }
+                                                        };
+                                                        handleChange("knowledge_base_connections", next);
+                                                    }}
+                                                    className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-white text-sm"
+                                                    placeholder="2023-11-01"
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="block text-xs text-gray-400 mb-1">API Key Env Var</label>
+                                                <input
+                                                    type="text"
+                                                    value={conn.api_key_env || ""}
+                                                    onChange={(e) => {
+                                                        const next = {
+                                                            ...(config.knowledge_base_connections || {}),
+                                                            [connKey]: { ...(conn || {}), api_key_env: e.target.value }
+                                                        };
+                                                        handleChange("knowledge_base_connections", next);
+                                                    }}
+                                                    className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-white text-sm"
+                                                    placeholder="AZURE_SEARCH_API_KEY"
+                                                />
+                                            </div>
+                                            <div className="col-span-2">
+                                                <label className="block text-xs text-gray-400 mb-1">API Key (optional)</label>
+                                                <input
+                                                    type="password"
+                                                    value={conn.api_key || ""}
+                                                    onChange={(e) => {
+                                                        const next = {
+                                                            ...(config.knowledge_base_connections || {}),
+                                                            [connKey]: { ...(conn || {}), api_key: e.target.value }
+                                                        };
+                                                        handleChange("knowledge_base_connections", next);
+                                                    }}
+                                                    className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-white text-sm"
+                                                    placeholder="Prefer env var in production"
+                                                />
+                                            </div>
+                                        </>
+                                    )}
+                                </div>
+                            </div>
+                        ))}
+                        <div>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    const key = prompt("KB connection key (e.g. azure_search_main):")?.trim();
+                                    if (!key) return;
+                                    const existing = config.knowledge_base_connections || {};
+                                    if (existing[key]) {
+                                        alert(`Knowledge base connection '${key}' already exists.`);
+                                        return;
+                                    }
+                                    handleChange("knowledge_base_connections", {
+                                        ...existing,
+                                        [key]: { type: "azure_search", api_version: "2023-11-01" }
+                                    });
+                                }}
+                                className="px-3 py-2 rounded text-xs bg-blue-700 hover:bg-blue-600 text-white"
+                            >
+                                + Add Knowledge Base Connection
                             </button>
                         </div>
                     </div>
