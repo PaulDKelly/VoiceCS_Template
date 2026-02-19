@@ -44,6 +44,44 @@ function readJsonFileSafe(filePath: string) {
     return JSON.parse(cleaned);
 }
 
+function sanitizeClientList(data: { industries: string[]; clients: Record<string, string[]> }) {
+    const skipClientBasenames = new Set([
+        "intents",
+        "prompts",
+        "intent_routing_rules",
+    ]);
+
+    const sanitizedClients: Record<string, string[]> = {};
+    for (const industry of data.industries || []) {
+        const candidates = data.clients?.[industry] || [];
+        const clean = candidates.filter((client) => {
+            const normalized = String(client || "").trim().toLowerCase();
+            if (!normalized) return false;
+            if (skipClientBasenames.has(normalized)) return false;
+            if (normalized.startsWith("workflow_")) return false;
+            if (normalized.endsWith("_template")) return false;
+
+            try {
+                const p = getClientConfigPath(industry, client);
+                if (!fs.existsSync(p)) return false;
+                const parsed = readJsonFileSafe(p);
+                const clientId = String(parsed?.client_id || "").trim();
+                const fileIndustry = String(parsed?.industry || "").trim();
+                const isTemplate = parsed?.is_template === true;
+                if (!clientId || isTemplate) return false;
+                if (clientId.toLowerCase() !== normalized) return false;
+                if (fileIndustry && fileIndustry.toLowerCase() !== industry.toLowerCase()) return false;
+                return true;
+            } catch {
+                return false;
+            }
+        });
+        sanitizedClients[industry] = clean;
+    }
+
+    return { industries: data.industries || [], clients: sanitizedClients };
+}
+
 function voiceKey(v: VoiceEntry) {
     const id = v.provider === "elevenlabs" ? (v.voice_id || "") : (v.voice_name || "");
     return `${v.provider}:${id}`;
@@ -384,13 +422,15 @@ export async function GET(req: NextRequest) {
 
     try {
         if (type === 'list' || !type) {
-            const data = await listConfigurations();
+            const raw = await listConfigurations();
+            const data = sanitizeClientList(raw);
             const filtered = filterConfigListForUser(user, data);
             return NextResponse.json(filtered);
         }
 
         if (type === 'industry' && industry) {
-            const data = await listConfigurations();
+            const raw = await listConfigurations();
+            const data = sanitizeClientList(raw);
             const clientsInIndustry = data.clients[industry] || [];
             if (!hasIndustryAccess(user, industry, clientsInIndustry)) {
                 return NextResponse.json({ error: 'Forbidden' }, { status: 403 });

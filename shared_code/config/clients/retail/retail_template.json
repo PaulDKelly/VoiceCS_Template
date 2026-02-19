@@ -1,5 +1,6 @@
 {
   "client_id": "retail_template",
+  "is_template": true,
   "industry": "Retail",
   "default_intent": "first_response",
   "intents": [
