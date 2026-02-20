@@ -1458,6 +1458,7 @@ function WorkflowVisualizerInner({
                                             <option value="">-- From Connection / Auto --</option>
                                             <option value="azure_search">Azure AI Search</option>
                                             <option value="supabase_rest">Supabase REST/RPC</option>
+                                            <option value="postgres">PostgreSQL (incl. Supabase pooled DB)</option>
                                         </select>
                                         {(
                                             selectedNode.data.actionConfig?.type === "supabase_rest" ||
@@ -1512,43 +1513,118 @@ function WorkflowVisualizerInner({
                                                 />
                                             </>
                                         ) : (
-                                            <>
-                                                <input
-                                                    type="text"
-                                                    className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs"
-                                                    placeholder="Search Endpoint, e.g. https://<service>.search.windows.net"
-                                                    value={selectedNode.data.actionConfig?.endpoint || ""}
-                                                    onChange={(e) => handleActionConfigChange("endpoint", e.target.value)}
-                                                />
-                                                <input
-                                                    type="text"
-                                                    className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs"
-                                                    placeholder="Index Name"
-                                                    value={selectedNode.data.actionConfig?.index_name || ""}
-                                                    onChange={(e) => handleActionConfigChange("index_name", e.target.value)}
-                                                />
-                                                <input
-                                                    type="text"
-                                                    className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs"
-                                                    placeholder="API Version (default 2023-11-01)"
-                                                    value={selectedNode.data.actionConfig?.api_version || ""}
-                                                    onChange={(e) => handleActionConfigChange("api_version", e.target.value)}
-                                                />
-                                                <input
-                                                    type="text"
-                                                    className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs"
-                                                    placeholder="API Key Env Var (recommended), e.g. AZURE_SEARCH_API_KEY"
-                                                    value={selectedNode.data.actionConfig?.api_key_env || ""}
-                                                    onChange={(e) => handleActionConfigChange("api_key_env", e.target.value)}
-                                                />
-                                                <input
-                                                    type="text"
-                                                    className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs"
-                                                    placeholder="API Key (optional, avoid for production)"
-                                                    value={selectedNode.data.actionConfig?.api_key || ""}
-                                                    onChange={(e) => handleActionConfigChange("api_key", e.target.value)}
-                                                />
-                                            </>
+                                            (
+                                                selectedNode.data.actionConfig?.type === "postgres" ||
+                                                (
+                                                    !selectedNode.data.actionConfig?.type &&
+                                                    selectedNode.data.actionConfig?.kb_connection_ref &&
+                                                    jsonContent.knowledge_base_connections?.[selectedNode.data.actionConfig.kb_connection_ref]?.type === "postgres"
+                                                )
+                                            ) ? (
+                                                <>
+                                                    <input
+                                                        type="text"
+                                                        className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs"
+                                                        placeholder="Host, e.g. aws-1-eu-west-1.pooler.supabase.com"
+                                                        value={selectedNode.data.actionConfig?.host || ""}
+                                                        onChange={(e) => handleActionConfigChange("host", e.target.value)}
+                                                    />
+                                                    <input
+                                                        type="text"
+                                                        className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs"
+                                                        placeholder="Port (default 5432)"
+                                                        value={selectedNode.data.actionConfig?.port || ""}
+                                                        onChange={(e) => handleActionConfigChange("port", e.target.value)}
+                                                    />
+                                                    <input
+                                                        type="text"
+                                                        className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs"
+                                                        placeholder="Database, e.g. postgres"
+                                                        value={selectedNode.data.actionConfig?.database || ""}
+                                                        onChange={(e) => handleActionConfigChange("database", e.target.value)}
+                                                    />
+                                                    <input
+                                                        type="text"
+                                                        className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs"
+                                                        placeholder="Schema (optional), e.g. public"
+                                                        value={selectedNode.data.actionConfig?.schema || ""}
+                                                        onChange={(e) => handleActionConfigChange("schema", e.target.value)}
+                                                    />
+                                                    <input
+                                                        type="text"
+                                                        className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs"
+                                                        placeholder="Username"
+                                                        value={selectedNode.data.actionConfig?.username || ""}
+                                                        onChange={(e) => handleActionConfigChange("username", e.target.value)}
+                                                    />
+                                                    <input
+                                                        type="text"
+                                                        className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs"
+                                                        placeholder="Password Env Var (recommended)"
+                                                        value={selectedNode.data.actionConfig?.password_env || ""}
+                                                        onChange={(e) => handleActionConfigChange("password_env", e.target.value)}
+                                                    />
+                                                    <input
+                                                        type="text"
+                                                        className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs"
+                                                        placeholder="Password (optional)"
+                                                        value={selectedNode.data.actionConfig?.password || ""}
+                                                        onChange={(e) => handleActionConfigChange("password", e.target.value)}
+                                                    />
+                                                    <input
+                                                        type="text"
+                                                        className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs"
+                                                        placeholder="Connection String (optional)"
+                                                        value={selectedNode.data.actionConfig?.connection_string || ""}
+                                                        onChange={(e) => handleActionConfigChange("connection_string", e.target.value)}
+                                                    />
+                                                    <textarea
+                                                        className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs"
+                                                        placeholder="SQL Query (required for postgres provider), use {query_text} and {top_k}"
+                                                        rows={3}
+                                                        value={selectedNode.data.actionConfig?.sql_query || ""}
+                                                        onChange={(e) => handleActionConfigChange("sql_query", e.target.value)}
+                                                    />
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <input
+                                                        type="text"
+                                                        className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs"
+                                                        placeholder="Search Endpoint, e.g. https://<service>.search.windows.net"
+                                                        value={selectedNode.data.actionConfig?.endpoint || ""}
+                                                        onChange={(e) => handleActionConfigChange("endpoint", e.target.value)}
+                                                    />
+                                                    <input
+                                                        type="text"
+                                                        className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs"
+                                                        placeholder="Index Name"
+                                                        value={selectedNode.data.actionConfig?.index_name || ""}
+                                                        onChange={(e) => handleActionConfigChange("index_name", e.target.value)}
+                                                    />
+                                                    <input
+                                                        type="text"
+                                                        className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs"
+                                                        placeholder="API Version (default 2023-11-01)"
+                                                        value={selectedNode.data.actionConfig?.api_version || ""}
+                                                        onChange={(e) => handleActionConfigChange("api_version", e.target.value)}
+                                                    />
+                                                    <input
+                                                        type="text"
+                                                        className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs"
+                                                        placeholder="API Key Env Var (recommended), e.g. AZURE_SEARCH_API_KEY"
+                                                        value={selectedNode.data.actionConfig?.api_key_env || ""}
+                                                        onChange={(e) => handleActionConfigChange("api_key_env", e.target.value)}
+                                                    />
+                                                    <input
+                                                        type="text"
+                                                        className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs"
+                                                        placeholder="API Key (optional, avoid for production)"
+                                                        value={selectedNode.data.actionConfig?.api_key || ""}
+                                                        onChange={(e) => handleActionConfigChange("api_key", e.target.value)}
+                                                    />
+                                                </>
+                                            )
                                         )}
                                         <textarea
                                             className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs"

@@ -808,6 +808,8 @@ def _resolve_knowledge_connection(action_config: dict, config: dict) -> dict:
         "endpoint", "index_name", "api_version",
         "api_key", "api_key_env",
         "supabase_url", "supabase_key", "supabase_key_env",
+        "host", "port", "database", "username", "password", "password_env",
+        "connection_string", "schema", "query_sql",
         "http_method", "body_template",
         "content_field", "title_field",
     ]:
@@ -816,13 +818,110 @@ def _resolve_knowledge_connection(action_config: dict, config: dict) -> dict:
     return merged
 
 
+def _execute_postgres_knowledge_search(
+    action_config: dict,
+    kb_cfg: dict,
+    session: dict,
+    config: dict,
+    query_text: str,
+    top_k: int,
+    timeout_seconds: float,
+    result_var: str,
+    content_field: str,
+    title_field: str,
+):
+    sql_template = str(
+        action_config.get("sql_query")
+        or kb_cfg.get("query_sql")
+        or ""
+    ).strip()
+    if not sql_template:
+        raise RuntimeError("Knowledge search (PostgreSQL) requires query_sql.")
+
+    session_for_sql = dict(session or {})
+    session_for_sql["query_text"] = query_text
+    session_for_sql["top_k"] = top_k
+
+    query, params = _build_query_and_params(sql_template, "postgres", session_for_sql, config)
+    conn, _ = _connect_db(kb_cfg, "postgres", timeout_seconds)
+    try:
+        cur = conn.cursor()
+        schema = str(kb_cfg.get("schema") or "").strip()
+        if schema:
+            if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", schema):
+                raise RuntimeError("Knowledge search (PostgreSQL) schema is invalid.")
+            cur.execute(f"SET search_path TO {schema}")
+
+        cur.execute(query, params)
+        if not cur.description:
+            raise RuntimeError("Knowledge search (PostgreSQL) query must return rows.")
+
+        rows = cur.fetchmany(max(top_k, 1))
+        docs = _rows_to_dicts(cur, rows)
+
+        hits = []
+        for d in docs:
+            if not isinstance(d, dict):
+                continue
+            title = d.get(title_field) or d.get("title") or d.get("name") or d.get("heading") or ""
+            content = (
+                d.get(content_field)
+                or d.get("content")
+                or d.get("text")
+                or d.get("chunk")
+                or d.get("body")
+                or d.get("summary")
+                or ""
+            )
+            score = d.get("score")
+            if score is None:
+                score = d.get("similarity")
+            if score is None:
+                score = d.get("distance")
+            hits.append({
+                "title": str(title or ""),
+                "content": str(content or ""),
+                "score": score,
+                "raw": d,
+            })
+
+        summary_lines = []
+        for h in hits:
+            if h["title"] and h["content"]:
+                summary_lines.append(f"{h['title']}: {h['content']}")
+            elif h["content"]:
+                summary_lines.append(h["content"])
+            elif h["title"]:
+                summary_lines.append(h["title"])
+        summary = " ".join([s.strip() for s in summary_lines if s.strip()][:top_k]).strip()
+
+        session[result_var] = {
+            "query": query_text,
+            "summary": summary,
+            "hits": hits,
+            "provider": "postgres",
+        }
+        print(f"DEBUG: Knowledge search (PostgreSQL) stored result in '{result_var}' ({len(hits)} hits)", flush=True)
+        return len(hits)
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
 def _execute_knowledge_search(action_config: dict, session: dict, config: dict):
     import requests
 
     kb_cfg = _resolve_knowledge_connection(action_config, config)
     kb_type = str(kb_cfg.get("type") or "").strip().lower()
     if not kb_type:
-        kb_type = "supabase_rest" if kb_cfg.get("supabase_url") else "azure_search"
+        if kb_cfg.get("supabase_url"):
+            kb_type = "supabase_rest"
+        elif kb_cfg.get("host") or kb_cfg.get("connection_string") or kb_cfg.get("database"):
+            kb_type = "postgres"
+        else:
+            kb_type = "azure_search"
 
     endpoint = str(kb_cfg.get("endpoint") or "").strip()
     index_name = str(kb_cfg.get("index_name") or "").strip()
@@ -842,6 +941,35 @@ def _execute_knowledge_search(action_config: dict, session: dict, config: dict):
     query_text = _replace_vars(query_template, session, config, url_encode=False).strip()
     if not query_text:
         query_text = str(session.get("_last_user_input") or "").strip()
+
+    if kb_type in ("postgres", "supabase_postgres"):
+        try:
+            hit_count = _execute_postgres_knowledge_search(
+                action_config=action_config,
+                kb_cfg=kb_cfg,
+                session=session,
+                config=config,
+                query_text=query_text,
+                top_k=top_k,
+                timeout_seconds=timeout_seconds,
+                result_var=result_var,
+                content_field=content_field,
+                title_field=title_field,
+            )
+            if (hit_count or 0) == 0 and no_results_prompt:
+                return {"prompt": str(no_results_prompt)}
+            if respond_immediately:
+                summary = str((session.get(result_var) or {}).get("summary") or "").strip()
+                if summary:
+                    return {"prompt": summary}
+            return None
+        except Exception as e:
+            err_text = f"{type(e).__name__}: {e}"
+            session[f"{result_var}_error"] = err_text
+            print(f"ERROR: Knowledge search action failed: {err_text}", flush=True)
+            if error_prompt:
+                return {"prompt": str(error_prompt)}
+            return None
 
     if kb_type == "supabase_rest":
         base_url = (

@@ -68,6 +68,15 @@ type ClientConfig = {
         supabase_url?: string;
         supabase_key?: string;
         supabase_key_env?: string;
+        host?: string;
+        port?: number | string;
+        database?: string;
+        username?: string;
+        password?: string;
+        password_env?: string;
+        connection_string?: string;
+        schema?: string;
+        query_sql?: string;
         http_method?: string;
         body_template?: string;
         content_field?: string;
@@ -1465,6 +1474,7 @@ export default function ClientConfigForm({ jsonContent, onChange, assignedPhoneN
                                         >
                                             <option value="azure_search">Azure AI Search</option>
                                             <option value="supabase_rest">Supabase REST/RPC</option>
+                                            <option value="postgres">PostgreSQL (incl. Supabase pooled DB)</option>
                                         </select>
                                     </div>
 
@@ -1564,6 +1574,153 @@ export default function ClientConfigForm({ jsonContent, onChange, assignedPhoneN
                                                     className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-white text-sm"
                                                     placeholder='{"query_text":"{_last_user_input}","match_count":3}'
                                                     rows={2}
+                                                />
+                                            </div>
+                                        </>
+                                    ) : (conn.type || "azure_search") === "postgres" ? (
+                                        <>
+                                            <div>
+                                                <label className="block text-xs text-gray-400 mb-1">Host</label>
+                                                <input
+                                                    type="text"
+                                                    value={conn.host || ""}
+                                                    onChange={(e) => {
+                                                        const next = {
+                                                            ...(config.knowledge_base_connections || {}),
+                                                            [connKey]: { ...(conn || {}), host: e.target.value }
+                                                        };
+                                                        handleChange("knowledge_base_connections", next);
+                                                    }}
+                                                    className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-white text-sm"
+                                                    placeholder="aws-1-eu-west-1.pooler.supabase.com"
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="block text-xs text-gray-400 mb-1">Port</label>
+                                                <input
+                                                    type="text"
+                                                    value={conn.port || ""}
+                                                    onChange={(e) => {
+                                                        const next = {
+                                                            ...(config.knowledge_base_connections || {}),
+                                                            [connKey]: { ...(conn || {}), port: e.target.value }
+                                                        };
+                                                        handleChange("knowledge_base_connections", next);
+                                                    }}
+                                                    className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-white text-sm"
+                                                    placeholder="5432"
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="block text-xs text-gray-400 mb-1">Database</label>
+                                                <input
+                                                    type="text"
+                                                    value={conn.database || ""}
+                                                    onChange={(e) => {
+                                                        const next = {
+                                                            ...(config.knowledge_base_connections || {}),
+                                                            [connKey]: { ...(conn || {}), database: e.target.value }
+                                                        };
+                                                        handleChange("knowledge_base_connections", next);
+                                                    }}
+                                                    className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-white text-sm"
+                                                    placeholder="postgres"
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="block text-xs text-gray-400 mb-1">Schema</label>
+                                                <input
+                                                    type="text"
+                                                    value={conn.schema || ""}
+                                                    onChange={(e) => {
+                                                        const next = {
+                                                            ...(config.knowledge_base_connections || {}),
+                                                            [connKey]: { ...(conn || {}), schema: e.target.value }
+                                                        };
+                                                        handleChange("knowledge_base_connections", next);
+                                                    }}
+                                                    className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-white text-sm"
+                                                    placeholder="public"
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="block text-xs text-gray-400 mb-1">Username</label>
+                                                <input
+                                                    type="text"
+                                                    value={conn.username || ""}
+                                                    onChange={(e) => {
+                                                        const next = {
+                                                            ...(config.knowledge_base_connections || {}),
+                                                            [connKey]: { ...(conn || {}), username: e.target.value }
+                                                        };
+                                                        handleChange("knowledge_base_connections", next);
+                                                    }}
+                                                    className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-white text-sm"
+                                                    placeholder="postgres.xxxxx"
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="block text-xs text-gray-400 mb-1">Password Env Var</label>
+                                                <input
+                                                    type="text"
+                                                    value={conn.password_env || ""}
+                                                    onChange={(e) => {
+                                                        const next = {
+                                                            ...(config.knowledge_base_connections || {}),
+                                                            [connKey]: { ...(conn || {}), password_env: e.target.value }
+                                                        };
+                                                        handleChange("knowledge_base_connections", next);
+                                                    }}
+                                                    className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-white text-sm"
+                                                    placeholder="SUPABASE_DB_PASSWORD"
+                                                />
+                                            </div>
+                                            <div className="col-span-2">
+                                                <label className="block text-xs text-gray-400 mb-1">Password (optional)</label>
+                                                <input
+                                                    type="password"
+                                                    value={conn.password || ""}
+                                                    onChange={(e) => {
+                                                        const next = {
+                                                            ...(config.knowledge_base_connections || {}),
+                                                            [connKey]: { ...(conn || {}), password: e.target.value }
+                                                        };
+                                                        handleChange("knowledge_base_connections", next);
+                                                    }}
+                                                    className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-white text-sm"
+                                                    placeholder="Prefer env var in production"
+                                                />
+                                            </div>
+                                            <div className="col-span-2">
+                                                <label className="block text-xs text-gray-400 mb-1">Connection String (optional)</label>
+                                                <input
+                                                    type="text"
+                                                    value={conn.connection_string || ""}
+                                                    onChange={(e) => {
+                                                        const next = {
+                                                            ...(config.knowledge_base_connections || {}),
+                                                            [connKey]: { ...(conn || {}), connection_string: e.target.value }
+                                                        };
+                                                        handleChange("knowledge_base_connections", next);
+                                                    }}
+                                                    className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-white text-sm"
+                                                    placeholder="postgresql://user:pass@host:5432/postgres?sslmode=require"
+                                                />
+                                            </div>
+                                            <div className="col-span-2">
+                                                <label className="block text-xs text-gray-400 mb-1">SQL Query Template</label>
+                                                <textarea
+                                                    value={conn.query_sql || ""}
+                                                    onChange={(e) => {
+                                                        const next = {
+                                                            ...(config.knowledge_base_connections || {}),
+                                                            [connKey]: { ...(conn || {}), query_sql: e.target.value }
+                                                        };
+                                                        handleChange("knowledge_base_connections", next);
+                                                    }}
+                                                    className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-white text-sm"
+                                                    placeholder="SELECT title, content, similarity FROM kb_chunks WHERE content ILIKE '%' || {query_text} || '%' ORDER BY similarity DESC LIMIT {top_k}"
+                                                    rows={3}
                                                 />
                                             </div>
                                         </>
