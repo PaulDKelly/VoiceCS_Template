@@ -205,8 +205,10 @@ export default function Home() {
         return;
       }
       console.error("Failed to load user profile", await res.text());
+      await signOut();
     } catch (e) {
       console.error("Failed to load user profile", e);
+      await signOut();
     }
   }
 
@@ -216,6 +218,13 @@ export default function Home() {
         fetch("/api/config?type=list", { cache: "no-store" }),
         fetch("/api/config?type=phone_mappings&_t=" + Date.now(), { cache: "no-store" }) // Cache bust
       ]);
+      if (resList.status === 401 || resMappings.status === 401) {
+        await signOut();
+        return;
+      }
+      if (!resList.ok) {
+        throw new Error(`Failed to load config list (${resList.status})`);
+      }
       const dataList = await resList.json();
       const dataMappings = resMappings.ok ? await resMappings.json() : { mappings: {} };
 
@@ -224,6 +233,8 @@ export default function Home() {
       setPhoneMappingsContent(JSON.stringify(dataMappings, null, 2));
     } catch (e) {
       console.error("Failed to load initial data", e);
+      setList({ industries: [], clients: {} });
+      setMessage("Error: Failed to load configuration list.");
     }
   }
 
