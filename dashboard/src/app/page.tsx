@@ -17,6 +17,22 @@ type ConfigList = {
   clients: Record<string, string[]>;
 };
 
+type NewClientDraft = {
+  industry: string;
+  brand_name: string;
+  assistant_name: string;
+  agent_name: string;
+  opening_hours: string;
+  brand_phone: string;
+  language: string;
+  tone: string;
+  tts_provider: "" | "elevenlabs" | "azure_neural";
+  elevenlabs_voice_id: string;
+  azure_voice_name: string;
+  intents_csv: string;
+  default_intent: string;
+};
+
 type NodePickerAction = {
   type: "prompt" | "action" | "condition" | "knowledge" | "handoff";
   nonce: number;
@@ -83,6 +99,21 @@ export default function Home() {
   const [modalType, setModalType] = useState<"create_industry" | "create_client" | "copy_client" | null>(null);
   const [modalData, setModalData] = useState<{ industry?: string, sourceClient?: string }>({});
   const [modalInput, setModalInput] = useState("");
+  const [newClientDraft, setNewClientDraft] = useState<NewClientDraft>({
+    industry: "",
+    brand_name: "",
+    assistant_name: "",
+    agent_name: "",
+    opening_hours: "",
+    brand_phone: "",
+    language: "en-GB",
+    tone: "",
+    tts_provider: "",
+    elevenlabs_voice_id: "",
+    azure_voice_name: "",
+    intents_csv: "",
+    default_intent: "first_response",
+  });
   const [settingsOpen, setSettingsOpen] = useState(false);
   const loadRequestIdRef = useRef(0);
   const loadAbortRef = useRef<AbortController | null>(null);
@@ -538,6 +569,21 @@ export default function Home() {
     setModalType('create_client');
     setModalData({ industry });
     setModalInput("");
+    setNewClientDraft({
+      industry: industry || "",
+      brand_name: "",
+      assistant_name: "",
+      agent_name: "",
+      opening_hours: "",
+      brand_phone: "",
+      language: "en-GB",
+      tone: "",
+      tts_provider: "",
+      elevenlabs_voice_id: "",
+      azure_voice_name: "",
+      intents_csv: "",
+      default_intent: "first_response",
+    });
     setModalOpen(true);
   };
 
@@ -556,7 +602,47 @@ export default function Home() {
     if (modalType === 'create_industry') {
       // uses newName
     } else if (modalType === 'create_client') {
-      payload.industry = modalData.industry;
+      payload.industry = (newClientDraft.industry || modalData.industry || "").trim();
+      if (!payload.industry) {
+        alert("Industry is required.");
+        return;
+      }
+
+      const normalizeIntent = (raw: string) =>
+        String(raw || "")
+          .toLowerCase()
+          .trim()
+          .replace(/\s+/g, "_")
+          .replace(/[^a-z0-9_]/g, "");
+
+      const intents = newClientDraft.intents_csv
+        .split(",")
+        .map((x) => normalizeIntent(x))
+        .filter(Boolean);
+
+      const content: any = {};
+      if (newClientDraft.brand_name.trim()) content.brand_name = newClientDraft.brand_name.trim();
+      if (newClientDraft.assistant_name.trim()) content.assistant_name = newClientDraft.assistant_name.trim();
+      if (newClientDraft.agent_name.trim()) content.agent_name = newClientDraft.agent_name.trim();
+      if (newClientDraft.opening_hours.trim()) content.opening_hours = newClientDraft.opening_hours.trim();
+      if (newClientDraft.brand_phone.trim()) content.brand_phone = newClientDraft.brand_phone.trim();
+      if (newClientDraft.language.trim()) content.language = newClientDraft.language.trim();
+      if (newClientDraft.tone.trim()) content.tone = newClientDraft.tone.trim();
+      if (intents.length) content.intents = Array.from(new Set(["first_response", ...intents]));
+
+      const defaultIntent = normalizeIntent(newClientDraft.default_intent);
+      if (defaultIntent) content.default_intent = defaultIntent;
+
+      if (newClientDraft.tts_provider) {
+        content.tts_provider = newClientDraft.tts_provider;
+        if (newClientDraft.tts_provider === "elevenlabs" && newClientDraft.elevenlabs_voice_id.trim()) {
+          content.elevenlabs_voice_id = newClientDraft.elevenlabs_voice_id.trim();
+        }
+        if (newClientDraft.tts_provider === "azure_neural" && newClientDraft.azure_voice_name.trim()) {
+          content.azure_voice_name = newClientDraft.azure_voice_name.trim();
+        }
+      }
+      payload.content = content;
     } else if (modalType === 'copy_client') {
       payload.industry = modalData.industry;
       payload.client = modalData.sourceClient;
@@ -1907,21 +1993,190 @@ export default function Home() {
       {/* Simple Modal */}
       {modalOpen && (
         <div className="absolute inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-gray-800 border border-gray-600 p-6 rounded shadow-xl w-96">
+          <div className={`bg-gray-800 border border-gray-600 p-6 rounded shadow-xl ${modalType === "create_client" ? "w-[38rem] max-h-[85vh] overflow-y-auto" : "w-96"}`}>
             <h3 className="text-lg font-bold mb-4 text-white">
               {modalType === 'create_industry' && "New Industry"}
               {modalType === 'create_client' && "New Client"}
               {modalType === 'copy_client' && "Copy Client"}
             </h3>
 
-            <input
-              type="text"
-              className="w-full bg-gray-900 border border-gray-600 rounded p-2 text-white mb-4"
-              placeholder="Enter name..."
-              value={modalInput}
-              onChange={(e) => setModalInput(e.target.value)}
-              autoFocus
-            />
+            {modalType !== "create_client" && (
+              <input
+                type="text"
+                className="w-full bg-gray-900 border border-gray-600 rounded p-2 text-white mb-4"
+                placeholder="Enter name..."
+                value={modalInput}
+                onChange={(e) => setModalInput(e.target.value)}
+                autoFocus
+              />
+            )}
+
+            {modalType === "create_client" && (
+              <div className="space-y-3 mb-4">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs text-gray-400 block mb-1">Client ID</label>
+                    <input
+                      type="text"
+                      className="w-full bg-gray-900 border border-gray-600 rounded p-2 text-white"
+                      placeholder="e.g. acme_retail"
+                      value={modalInput}
+                      onChange={(e) => setModalInput(e.target.value)}
+                      autoFocus
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-gray-400 block mb-1">Industry</label>
+                    <select
+                      className="w-full bg-gray-900 border border-gray-600 rounded p-2 text-white"
+                      value={newClientDraft.industry}
+                      onChange={(e) => setNewClientDraft((prev) => ({ ...prev, industry: e.target.value }))}
+                    >
+                      <option value="">Select industry...</option>
+                      {(list?.industries || []).map((ind) => (
+                        <option key={ind} value={ind}>{ind}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs text-gray-400 block mb-1">Brand Name</label>
+                    <input
+                      type="text"
+                      className="w-full bg-gray-900 border border-gray-600 rounded p-2 text-white"
+                      value={newClientDraft.brand_name}
+                      onChange={(e) => setNewClientDraft((prev) => ({ ...prev, brand_name: e.target.value }))}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-gray-400 block mb-1">Assistant Name</label>
+                    <input
+                      type="text"
+                      className="w-full bg-gray-900 border border-gray-600 rounded p-2 text-white"
+                      value={newClientDraft.assistant_name}
+                      onChange={(e) => setNewClientDraft((prev) => ({ ...prev, assistant_name: e.target.value }))}
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs text-gray-400 block mb-1">Agent Name</label>
+                    <input
+                      type="text"
+                      className="w-full bg-gray-900 border border-gray-600 rounded p-2 text-white"
+                      value={newClientDraft.agent_name}
+                      onChange={(e) => setNewClientDraft((prev) => ({ ...prev, agent_name: e.target.value }))}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-gray-400 block mb-1">Language</label>
+                    <input
+                      type="text"
+                      className="w-full bg-gray-900 border border-gray-600 rounded p-2 text-white"
+                      value={newClientDraft.language}
+                      onChange={(e) => setNewClientDraft((prev) => ({ ...prev, language: e.target.value }))}
+                      placeholder="en-GB"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs text-gray-400 block mb-1">Brand Phone</label>
+                    <input
+                      type="text"
+                      className="w-full bg-gray-900 border border-gray-600 rounded p-2 text-white"
+                      value={newClientDraft.brand_phone}
+                      onChange={(e) => setNewClientDraft((prev) => ({ ...prev, brand_phone: e.target.value }))}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-gray-400 block mb-1">Opening Hours</label>
+                    <input
+                      type="text"
+                      className="w-full bg-gray-900 border border-gray-600 rounded p-2 text-white"
+                      value={newClientDraft.opening_hours}
+                      onChange={(e) => setNewClientDraft((prev) => ({ ...prev, opening_hours: e.target.value }))}
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-xs text-gray-400 block mb-1">Tone</label>
+                  <input
+                    type="text"
+                    className="w-full bg-gray-900 border border-gray-600 rounded p-2 text-white"
+                    value={newClientDraft.tone}
+                    onChange={(e) => setNewClientDraft((prev) => ({ ...prev, tone: e.target.value }))}
+                    placeholder="friendly, concise, helpful"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs text-gray-400 block mb-1">Intents (comma separated)</label>
+                    <input
+                      type="text"
+                      className="w-full bg-gray-900 border border-gray-600 rounded p-2 text-white"
+                      value={newClientDraft.intents_csv}
+                      onChange={(e) => setNewClientDraft((prev) => ({ ...prev, intents_csv: e.target.value }))}
+                      placeholder="sales, warranty, returns, refunds"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-gray-400 block mb-1">Default Intent</label>
+                    <input
+                      type="text"
+                      className="w-full bg-gray-900 border border-gray-600 rounded p-2 text-white"
+                      value={newClientDraft.default_intent}
+                      onChange={(e) => setNewClientDraft((prev) => ({ ...prev, default_intent: e.target.value }))}
+                      placeholder="first_response"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs text-gray-400 block mb-1">TTS Provider</label>
+                    <select
+                      className="w-full bg-gray-900 border border-gray-600 rounded p-2 text-white"
+                      value={newClientDraft.tts_provider}
+                      onChange={(e) => setNewClientDraft((prev) => ({ ...prev, tts_provider: e.target.value as NewClientDraft["tts_provider"] }))}
+                    >
+                      <option value="">Use system default</option>
+                      <option value="elevenlabs">ElevenLabs</option>
+                      <option value="azure_neural">Azure Neural</option>
+                    </select>
+                  </div>
+                  {newClientDraft.tts_provider === "elevenlabs" && (
+                    <div>
+                      <label className="text-xs text-gray-400 block mb-1">ElevenLabs Voice ID</label>
+                      <input
+                        type="text"
+                        className="w-full bg-gray-900 border border-gray-600 rounded p-2 text-white"
+                        value={newClientDraft.elevenlabs_voice_id}
+                        onChange={(e) => setNewClientDraft((prev) => ({ ...prev, elevenlabs_voice_id: e.target.value }))}
+                      />
+                    </div>
+                  )}
+                  {newClientDraft.tts_provider === "azure_neural" && (
+                    <div>
+                      <label className="text-xs text-gray-400 block mb-1">Azure Voice Name</label>
+                      <input
+                        type="text"
+                        className="w-full bg-gray-900 border border-gray-600 rounded p-2 text-white"
+                        value={newClientDraft.azure_voice_name}
+                        onChange={(e) => setNewClientDraft((prev) => ({ ...prev, azure_voice_name: e.target.value }))}
+                        placeholder="en-GB-LibbyNeural"
+                      />
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
 
             <div className="flex justify-end gap-2">
               <button onClick={() => setModalOpen(false)} className="px-4 py-2 text-gray-400 hover:text-white">Cancel</button>

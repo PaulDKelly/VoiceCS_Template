@@ -136,33 +136,205 @@ function cloneDeep<T>(value: T): T {
     }
 }
 
+function loadGlobalWorkflowTemplates(includeExtended = false) {
+    const templates: Array<{ key: string; label: string; workflow: any }> = [];
+    const seen = new Set<string>();
+    const normalizedNameToKey = new Map<string, string>();
+
+    const toDisplayName = (raw: string) => {
+        const text = String(raw || "").trim().replace(/[_\-]+/g, " ");
+        return text ? text.replace(/\b\w/g, (c) => c.toUpperCase()) : raw;
+    };
+
+    const addTemplate = (key: string, label: string, workflow: any, workflowName?: string) => {
+        if (!key || !workflow || seen.has(key)) return;
+        const normalized = normalizeIntentName(String(workflowName || "").trim());
+        if (normalized) {
+            if (normalizedNameToKey.has(normalized)) return;
+            normalizedNameToKey.set(normalized, key);
+        }
+        seen.add(key);
+        templates.push({ key, label, workflow: cloneDeep(workflow) });
+    };
+
+    // 0) Intent library workflow templates (global by design).
+    const intentLib = loadIntentLibrary();
+    for (const entry of intentLib.intents || []) {
+        if (!entry?.name || !entry?.workflow_template) continue;
+        addTemplate(
+            `library:intent:${entry.name}`,
+            `${toDisplayName(entry.label || entry.name)}`,
+            entry.workflow_template,
+            entry.name
+        );
+    }
+
+    for (const root of getConfigRootCandidates()) {
+        // 1) Industry defaults workflows as fallback source, deduped by workflow name.
+        const industriesDir = path.join(root, "industries");
+        if (fs.existsSync(industriesDir)) {
+            const industryEntries = fs.readdirSync(industriesDir, { withFileTypes: true });
+            for (const entry of industryEntries) {
+                if (!entry.isDirectory()) continue;
+                const industry = entry.name;
+                const defaultsPath = path.join(industriesDir, industry, "defaults.json");
+                if (!fs.existsSync(defaultsPath)) continue;
+                try {
+                    const parsed = readJsonFileSafe(defaultsPath);
+                    const workflows = parsed?.workflows && typeof parsed.workflows === "object" ? parsed.workflows : {};
+                    for (const [wfName, wf] of Object.entries(workflows as Record<string, any>)) {
+                        if (wfName === "general") continue;
+                        addTemplate(
+                            `industry:${industry}:${wfName}`,
+                            `${toDisplayName(wfName)}`,
+                            wf,
+                            wfName
+                        );
+                    }
+                } catch {
+                    // skip unreadable defaults
+                }
+            }
+        }
+
+        // 2) Client folder workflow sources:
+        //    - standalone workflow_*.json files
+        //    - template client files (e.g. retail_template.json) with workflows map
+        const clientsDir = path.join(root, "clients");
+        if (fs.existsSync(clientsDir)) {
+            const industryEntries = fs.readdirSync(clientsDir, { withFileTypes: true });
+            for (const industryEntry of industryEntries) {
+                if (!industryEntry.isDirectory()) continue;
+                const industry = industryEntry.name;
+                const industryPath = path.join(clientsDir, industry);
+                const files = fs.readdirSync(industryPath, { withFileTypes: true });
+                for (const file of files) {
+                    if (!file.isFile()) continue;
+                    const fileName = file.name;
+                    if (!fileName.endsWith(".json")) continue;
+                    const fullPath = path.join(industryPath, fileName);
+                    const lowerName = fileName.toLowerCase();
+
+                    if (lowerName.startsWith("workflow_")) {
+                        try {
+                            const wf = readJsonFileSafe(fullPath);
+                            const baseName = fileName.replace(/\.json$/i, "");
+                            const wfName = baseName.replace(/^workflow_/i, "");
+                            addTemplate(
+                                `file:${industry}:${wfName}`,
+                                `${toDisplayName(wfName)}`,
+                                wf,
+                                wfName
+                            );
+                        } catch {
+                            // skip unreadable workflow file
+                        }
+                        continue;
+                    }
+
+                    const isLikelyTemplateFile =
+                        lowerName.endsWith("_template.json") ||
+                        lowerName.includes("template");
+                    if (!isLikelyTemplateFile) continue;
+                    try {
+                        const parsed = readJsonFileSafe(fullPath);
+                        const isTemplate = parsed?.is_template === true || isLikelyTemplateFile;
+                        if (!isTemplate) continue;
+                        const workflows = parsed?.workflows && typeof parsed.workflows === "object" ? parsed.workflows : {};
+                        for (const [wfName, wf] of Object.entries(workflows as Record<string, any>)) {
+                            if (wfName === "general") continue;
+                            addTemplate(
+                                `template:${industry}:${wfName}`,
+                                `${toDisplayName(wfName)}`,
+                                wf,
+                                wfName
+                            );
+                        }
+                    } catch {
+                        // skip unreadable template client file
+                    }
+                }
+            }
+        }
+    }
+
+    if (!includeExtended) {
+        return templates;
+    }
+
+    return templates;
+}
+
+function loadGlobalWorkflowTemplateMap() {
+    const out: Record<string, any> = {};
+    const templates = loadGlobalWorkflowTemplates(true);
+    for (const tpl of templates) {
+        const keyPart = String(tpl?.key || "").split(":").pop() || "";
+        const labelPart = String(tpl?.label || "");
+        const name = normalizeIntentName(keyPart || labelPart);
+        if (!name || name === "general") continue;
+        if (!out[name]) out[name] = cloneDeep(tpl.workflow);
+    }
+    return out;
+}
+
 function normalizeIntentName(raw: string) {
     return String(raw || "").toLowerCase().trim().replace(/\s+/g, "_").replace(/[^a-z0-9_]/g, "");
 }
 
+function getConfigRootCandidates(): string[] {
+    const roots = new Set<string>();
+    roots.add(getConfigPath());
+    roots.add(path.resolve(process.cwd(), '../shared_code/config'));
+    roots.add(path.resolve(process.cwd(), 'config'));
+    return Array.from(roots);
+}
+
 function loadIntentLibrary(): { intents: IntentLibraryEntry[] } {
-    const p = getIntentLibraryPath();
-    if (!fs.existsSync(p)) return { intents: [] };
-    const parsed = readJsonFileSafe(p);
-    const src = Array.isArray(parsed?.intents) ? parsed.intents : [];
-    const intents = src
-        .map((entry: any) => {
+    const merged = new Map<string, IntentLibraryEntry>();
+    const candidates = getConfigRootCandidates().map((root) => path.join(root, 'intent_library.json'));
+
+    for (const p of candidates) {
+        if (!fs.existsSync(p)) continue;
+        let parsed: any = null;
+        try {
+            parsed = readJsonFileSafe(p);
+        } catch {
+            continue;
+        }
+        const src = Array.isArray(parsed?.intents) ? parsed.intents : [];
+        for (const entry of src) {
+            let normalized: string | null = null;
+            let next: IntentLibraryEntry | null = null;
             if (typeof entry === "string") {
-                const name = normalizeIntentName(entry);
-                if (!name || name === "general") return null;
-                return { name };
+                normalized = normalizeIntentName(entry);
+                if (!normalized || normalized === "general") continue;
+                next = { name: normalized };
+            } else if (entry && typeof entry === "object") {
+                normalized = normalizeIntentName(entry.name);
+                if (!normalized || normalized === "general") continue;
+                next = {
+                    name: normalized,
+                    label: typeof entry.label === "string" ? entry.label : undefined,
+                    workflow_template: entry.workflow_template
+                };
             }
-            if (!entry || typeof entry !== "object") return null;
-            const name = normalizeIntentName(entry.name);
-            if (!name || name === "general") return null;
-            return {
-                name,
-                label: typeof entry.label === "string" ? entry.label : undefined,
-                workflow_template: entry.workflow_template
-            };
-        })
-        .filter((x: IntentLibraryEntry | null): x is IntentLibraryEntry => !!x);
-    return { intents };
+            if (!normalized || !next) continue;
+            const prev = merged.get(normalized);
+            if (!prev) {
+                merged.set(normalized, next);
+            } else {
+                merged.set(normalized, {
+                    ...prev,
+                    ...next,
+                    // Prefer any template that exists
+                    workflow_template: next.workflow_template || prev.workflow_template
+                });
+            }
+        }
+    }
+
+    return { intents: Array.from(merged.values()) };
 }
 
 function loadPromptLibraryEntries(): Array<{ suggested_key?: string; text?: string }> {
@@ -426,6 +598,12 @@ export async function GET(req: NextRequest) {
             const data = sanitizeClientList(raw);
             const filtered = filterConfigListForUser(user, data);
             return NextResponse.json(filtered);
+        }
+
+        if (type === "workflow_templates") {
+            const includeExtended = searchParams.get("include_extended") === "1";
+            const templates = loadGlobalWorkflowTemplates(includeExtended);
+            return NextResponse.json({ templates });
         }
 
         if (type === 'industry' && industry) {
@@ -780,6 +958,16 @@ export async function POST(req: NextRequest) {
             if (!newName) return NextResponse.json({ error: 'New Name required' }, { status: 400 });
             const targetPath = getClientConfigPath(industry, newName);
             if (fs.existsSync(targetPath)) return NextResponse.json({ error: 'Client already exists' }, { status: 409 });
+            const requestedContent = (content && typeof content === "object" && !Array.isArray(content))
+                ? (content as Record<string, any>)
+                : null;
+
+            const normalizeIntentName = (raw: string) =>
+                String(raw || "")
+                    .toLowerCase()
+                    .trim()
+                    .replace(/\s+/g, "_")
+                    .replace(/[^a-z0-9_]/g, "");
 
             // Default content
             let initialContent: Record<string, any> = { client_id: newName, industry };
@@ -856,6 +1044,55 @@ export async function POST(req: NextRequest) {
                     }
                 } catch (e) { }
             }
+
+            // Apply create-client form overrides (if provided)
+            if (requestedContent) {
+                const scalarFields = [
+                    "brand_name",
+                    "assistant_name",
+                    "agent_name",
+                    "opening_hours",
+                    "brand_phone",
+                    "tone",
+                    "language",
+                    "tts_provider",
+                    "elevenlabs_voice_id",
+                    "azure_voice_name",
+                    "default_intent",
+                ];
+                for (const field of scalarFields) {
+                    const value = requestedContent[field];
+                    if (value === undefined || value === null) continue;
+                    const text = String(value).trim();
+                    if (!text) continue;
+                    initialContent[field] = field === "default_intent" ? normalizeIntentName(text) : text;
+                }
+
+                if (Array.isArray(requestedContent.intents)) {
+                    const intents = requestedContent.intents
+                        .map((i: any) => normalizeIntentName(String(i || "")))
+                        .filter(Boolean);
+                    if (intents.length) {
+                        const next = new Set<string>(["first_response", ...intents]);
+                        initialContent.intents = Array.from(next);
+                    }
+                }
+            }
+
+            // Ensure selected intents have workflows from global template library.
+            const templateMap = loadGlobalWorkflowTemplateMap();
+            const configuredIntents = Array.isArray(initialContent.intents) ? initialContent.intents : [];
+            for (const rawIntent of configuredIntents) {
+                const intent = normalizeIntentName(String(rawIntent || ""));
+                if (!intent || intent === "general" || intent === "first_response") continue;
+                if (!initialContent.workflows?.[intent] && templateMap[intent]) {
+                    initialContent.workflows[intent] = cloneDeep(templateMap[intent]);
+                }
+            }
+
+            // Ensure required identity fields always win
+            initialContent.client_id = newName;
+            initialContent.industry = industry;
 
             const dir = path.dirname(targetPath);
             if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });

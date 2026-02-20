@@ -161,6 +161,8 @@ function WorkflowVisualizerInner({
     const [showIntentModal, setShowIntentModal] = useState(false);
     const [newIntentName, setNewIntentName] = useState("");
     const [newWorkflowTemplateKey, setNewWorkflowTemplateKey] = useState("");
+    const [globalWorkflowTemplates, setGlobalWorkflowTemplates] = useState<Array<{ key: string; label: string; workflow: any }>>([]);
+    const lastHandledAddWorkflowNonceRef = useRef<number>(addWorkflowRequestNonce || 0);
 
     const [internalSelectedWorkflowKey, setInternalSelectedWorkflowKey] = useState<string | null>(null);
     const selectedWorkflowKey = selectedWorkflowKeyProp ?? internalSelectedWorkflowKey;
@@ -557,6 +559,8 @@ function WorkflowVisualizerInner({
 
     useEffect(() => {
         if (!addWorkflowRequestNonce) return;
+        if (addWorkflowRequestNonce === lastHandledAddWorkflowNonceRef.current) return;
+        lastHandledAddWorkflowNonceRef.current = addWorkflowRequestNonce;
         setShowIntentModal(true);
     }, [addWorkflowRequestNonce]);
 
@@ -879,9 +883,11 @@ function WorkflowVisualizerInner({
         const updatedWorkflows = { ...(jsonContent.workflows || {}) };
 
         // 2. Try to copy from selected existing workflow template
+        const globalTemplate = globalWorkflowTemplates.find((t) => t.key === newWorkflowTemplateKey)?.workflow;
         const selectedTemplate =
             (newWorkflowTemplateKey && updatedWorkflows[newWorkflowTemplateKey])
-            || (newWorkflowTemplateKey && industryDefaults?.workflows?.[newWorkflowTemplateKey]);
+            || (newWorkflowTemplateKey && industryDefaults?.workflows?.[newWorkflowTemplateKey])
+            || globalTemplate;
         if (selectedTemplate) {
             updatedWorkflows[name] = cloneWorkflow(selectedTemplate);
         }
@@ -938,6 +944,26 @@ function WorkflowVisualizerInner({
         ...contentWorkflows,
         ...defaultWorkflows
     ]));
+
+    useEffect(() => {
+        if (!showIntentModal) return;
+        let cancelled = false;
+        (async () => {
+            try {
+                const res = await fetch("/api/config?type=workflow_templates", { cache: "no-store" });
+                if (!res.ok) return;
+                const data = await res.json();
+                if (cancelled) return;
+                const templates = Array.isArray(data?.templates) ? data.templates : [];
+                setGlobalWorkflowTemplates(templates);
+            } catch {
+                if (!cancelled) setGlobalWorkflowTemplates([]);
+            }
+        })();
+        return () => {
+            cancelled = true;
+        };
+    }, [showIntentModal]);
     const promptKeysAll = jsonContent.prompts ? Object.keys(jsonContent.prompts) : [];
     const promptKeysByIntent = selectedWorkflowKey
         ? promptKeysAll.filter(k => k === selectedWorkflowKey || k.startsWith(`${selectedWorkflowKey}_`))
@@ -1073,7 +1099,12 @@ function WorkflowVisualizerInner({
                             <option value="">Blank / industry default for this intent</option>
                             {templateWorkflowOptions.map((key) => (
                                 <option key={key} value={key}>
-                                    {key}
+                                    Current / {key}
+                                </option>
+                            ))}
+                            {globalWorkflowTemplates.map((tpl) => (
+                                <option key={tpl.key} value={tpl.key}>
+                                    Template / {tpl.label}
                                 </option>
                             ))}
                         </select>

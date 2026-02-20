@@ -98,6 +98,12 @@ type IntentEntry = {
     workflow_template?: any;
 };
 
+type WorkflowTemplateEntry = {
+    key: string;
+    label: string;
+    workflow: any;
+};
+
 export default function ClientConfigForm({ jsonContent, onChange, assignedPhoneNumber, canManageVoiceLibrary, canManageIntentLibrary }: Props) {
     const [config, setConfig] = useState<ClientConfig>(jsonContent);
     const [industryDefaults, setIndustryDefaults] = useState<any>(null);
@@ -111,6 +117,7 @@ export default function ClientConfigForm({ jsonContent, onChange, assignedPhoneN
     const [voiceLibraryError, setVoiceLibraryError] = useState<string | null>(null);
     const [intentLibrary, setIntentLibrary] = useState<IntentEntry[]>([]);
     const [intentLibraryError, setIntentLibraryError] = useState<string | null>(null);
+    const [globalTemplateMap, setGlobalTemplateMap] = useState<Record<string, any>>({});
     const [selectedLibraryIntent, setSelectedLibraryIntent] = useState<string>("");
     const [newIntentName, setNewIntentName] = useState<string>("");
     const [newIntentLabel, setNewIntentLabel] = useState<string>("");
@@ -258,12 +265,12 @@ export default function ClientConfigForm({ jsonContent, onChange, assignedPhoneN
         return source
             .map((entry: any) => {
                 if (typeof entry === "string") {
-                    const name = entry.trim();
+                    const name = normalizeIntentName(entry);
                     if (name === "general") return null;
                     return { name, label: name };
                 }
                 if (entry && typeof entry === "object") {
-                    const name = String(entry.name || "").trim();
+                    const name = normalizeIntentName(String(entry.name || ""));
                     if (!name || name === "general") return null;
                     return {
                         name,
@@ -287,6 +294,7 @@ export default function ClientConfigForm({ jsonContent, onChange, assignedPhoneN
         Object.keys(config.workflows || {}).forEach((i) => { if (i !== "general") known.add(i); });
         (industryDefaults?.intents || []).forEach((i: string) => { if (i !== "general") known.add(i); });
         Object.keys(industryDefaults?.workflows || {}).forEach((i) => { if (i !== "general") known.add(i); });
+        Object.keys(globalTemplateMap || {}).forEach((i) => { if (i !== "general") known.add(i); });
 
         const map = new Map<string, IntentEntry>();
         base.forEach((entry) => map.set(entry.name, entry));
@@ -297,11 +305,30 @@ export default function ClientConfigForm({ jsonContent, onChange, assignedPhoneN
                 map.set(intentName, {
                     name: intentName,
                     label: toIntentLabel(intentName),
-                    workflow_template: industryDefaults?.workflows?.[intentName]
+                    workflow_template: industryDefaults?.workflows?.[intentName] || globalTemplateMap?.[intentName]
                 });
             }
         });
         return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
+    };
+
+    const loadGlobalWorkflowTemplates = async () => {
+        try {
+            const res = await fetch(`/api/config?type=workflow_templates&_t=${Date.now()}`);
+            const data = await res.json().catch(() => null);
+            if (!res.ok) return;
+            const templates = Array.isArray(data?.templates) ? (data.templates as WorkflowTemplateEntry[]) : [];
+            const nextMap: Record<string, any> = {};
+            for (const tpl of templates) {
+                const keyPart = String(tpl?.key || "").split(":").pop() || "";
+                const name = normalizeIntentName(keyPart || tpl?.label || "");
+                if (!name || name === "general") continue;
+                if (!nextMap[name]) nextMap[name] = cloneTemplate(tpl.workflow);
+            }
+            setGlobalTemplateMap(nextMap);
+        } catch {
+            // ignore
+        }
     };
 
     const loadIntentLibrary = async () => {
@@ -340,11 +367,12 @@ export default function ClientConfigForm({ jsonContent, onChange, assignedPhoneN
 
     useEffect(() => {
         loadIntentLibrary();
+        loadGlobalWorkflowTemplates();
     }, []);
 
     useEffect(() => {
         setIntentLibrary((prev) => mergeKnownIntents(prev));
-    }, [industryDefaults, config.intents, config.workflows]);
+    }, [industryDefaults, config.intents, config.workflows, globalTemplateMap]);
 
 
     const handleChange = (field: string, value: any) => {
@@ -592,6 +620,12 @@ export default function ClientConfigForm({ jsonContent, onChange, assignedPhoneN
         if (industryDefaults?.workflows?.[intent]) {
             console.log(`[Using industry template for ${intent}]`);
             return cloneTemplate(industryDefaults.workflows[intent]);
+        }
+
+        // Try global library templates
+        if (globalTemplateMap?.[intent]) {
+            console.log(`[Using global template for ${intent}]`);
+            return cloneTemplate(globalTemplateMap[intent]);
         }
 
         // Fallback to basic template
@@ -1888,7 +1922,10 @@ export default function ClientConfigForm({ jsonContent, onChange, assignedPhoneN
                                 onClick={() => {
                                     if (!selectedLibraryIntent) return;
                                     const selectedEntry = intentLibrary.find((entry) => entry.name === selectedLibraryIntent);
-                                    const ok = addIntentToClient(selectedLibraryIntent, selectedEntry?.workflow_template);
+                                    const ok = addIntentToClient(
+                                        selectedLibraryIntent,
+                                        selectedEntry?.workflow_template || globalTemplateMap?.[selectedLibraryIntent]
+                                    );
                                     if (ok) {
                                         setSelectedLibraryIntent("");
                                         alert(`Intent "${selectedLibraryIntent}" added with starter workflow. Click Save at the top.`);
