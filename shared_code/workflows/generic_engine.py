@@ -818,12 +818,84 @@ def _resolve_knowledge_connection(action_config: dict, config: dict) -> dict:
     return merged
 
 
+def _normalize_kb_domain(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    if not text:
+        return ""
+    text = re.sub(r"[\s\-]+", "_", text)
+    text = re.sub(r"[^a-z0-9_]", "", text)
+    return text
+
+
+def _kb_scope_domains(action_config: dict, session: dict, config: dict) -> set[str]:
+    behavior = config.get("knowledge_base_behavior") or {}
+    scope_mode = str(
+        action_config.get("kb_scope")
+        or behavior.get("scope_mode")
+        or "workflow"
+    ).strip().lower()
+
+    if scope_mode in ("none", "off", "global"):
+        return set()
+
+    explicit = action_config.get("kb_domains") or action_config.get("allowed_domains")
+    domains: list[str] = []
+    if isinstance(explicit, str):
+        domains = [d.strip() for d in explicit.split(",")]
+    elif isinstance(explicit, list):
+        domains = [str(d).strip() for d in explicit if str(d).strip()]
+
+    if not domains:
+        active_intent = _normalize_kb_domain(session.get("intent"))
+        if active_intent:
+            domains.append(active_intent)
+
+    include_general = bool(behavior.get("include_general", True))
+    if include_general:
+        domains.append("general")
+
+    normalized = {_normalize_kb_domain(d) for d in domains if _normalize_kb_domain(d)}
+    return normalized
+
+
+def _hit_domains(raw: Any) -> set[str]:
+    if not isinstance(raw, dict):
+        return set()
+    keys = ("domain", "domains", "workflow", "intent", "category", "topic")
+    out: set[str] = set()
+    for key in keys:
+        value = raw.get(key)
+        if isinstance(value, list):
+            for item in value:
+                d = _normalize_kb_domain(item)
+                if d:
+                    out.add(d)
+        else:
+            d = _normalize_kb_domain(value)
+            if d:
+                out.add(d)
+    return out
+
+
+def _apply_kb_scope(hits: list[dict], allowed_domains: set[str]) -> list[dict]:
+    if not allowed_domains or not hits:
+        return hits
+    filtered = []
+    for h in hits:
+        hit_domains = _hit_domains(h.get("raw"))
+        # Keep unknown-domain hits to avoid dropping all results when metadata is sparse.
+        if not hit_domains or (hit_domains & allowed_domains):
+            filtered.append(h)
+    return filtered
+
+
 def _execute_postgres_knowledge_search(
     action_config: dict,
     kb_cfg: dict,
     session: dict,
     config: dict,
     query_text: str,
+    allowed_domains: set[str],
     top_k: int,
     timeout_seconds: float,
     result_var: str,
@@ -841,6 +913,8 @@ def _execute_postgres_knowledge_search(
     session_for_sql = dict(session or {})
     session_for_sql["query_text"] = query_text
     session_for_sql["top_k"] = top_k
+    session_for_sql["kb_domains_csv"] = ",".join(sorted(allowed_domains)) if allowed_domains else ""
+    session_for_sql["kb_domain"] = next(iter(sorted(allowed_domains)), "")
 
     query, params = _build_query_and_params(sql_template, "postgres", session_for_sql, config)
     conn, _ = _connect_db(kb_cfg, "postgres", timeout_seconds)
@@ -884,6 +958,8 @@ def _execute_postgres_knowledge_search(
                 "score": score,
                 "raw": d,
             })
+
+        hits = _apply_kb_scope(hits, allowed_domains)
 
         summary_lines = []
         for h in hits:
@@ -942,6 +1018,11 @@ def _execute_knowledge_search(action_config: dict, session: dict, config: dict):
     if not query_text:
         query_text = str(session.get("_last_user_input") or "").strip()
 
+    allowed_domains = _kb_scope_domains(action_config, session, config)
+    if allowed_domains:
+        # Domain hint improves retrieval relevance even when backend query is generic.
+        query_text = f"[domain:{','.join(sorted(allowed_domains))}] {query_text}".strip()
+
     if kb_type in ("postgres", "supabase_postgres"):
         try:
             hit_count = _execute_postgres_knowledge_search(
@@ -950,6 +1031,7 @@ def _execute_knowledge_search(action_config: dict, session: dict, config: dict):
                 session=session,
                 config=config,
                 query_text=query_text,
+                allowed_domains=allowed_domains,
                 top_k=top_k,
                 timeout_seconds=timeout_seconds,
                 result_var=result_var,
@@ -1087,6 +1169,8 @@ def _execute_knowledge_search(action_config: dict, session: dict, config: dict):
                     "raw": d,
                 })
 
+            hits = _apply_kb_scope(hits, allowed_domains)
+
             summary_lines = []
             for h in hits:
                 if h["title"] and h["content"]:
@@ -1166,6 +1250,8 @@ def _execute_knowledge_search(action_config: dict, session: dict, config: dict):
                 "score": score,
                 "raw": d,
             })
+
+        hits = _apply_kb_scope(hits, allowed_domains)
 
         summary_lines = []
         for h in hits:
