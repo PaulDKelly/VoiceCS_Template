@@ -17,6 +17,11 @@ function xmlEscape(value: string) {
         .replace(/'/g, "&apos;");
 }
 
+function isValidAzureRegion(value: string) {
+    const region = String(value || "").trim().toLowerCase();
+    return /^[a-z0-9-]{2,32}$/.test(region);
+}
+
 export async function POST(req: Request) {
     try {
         const body = await req.json();
@@ -24,10 +29,9 @@ export async function POST(req: Request) {
         const text = (body?.text as string) || DEFAULT_TEST_TEXT;
 
         if (provider === "azure_neural") {
-            const speechRegion =
-                (body?.azureRegion as string) ||
-                process.env.AZURE_SPEECH_REGION ||
-                "";
+            const requestedRegion = String((body?.azureRegion as string) || "").trim();
+            const envRegion = String(process.env.AZURE_SPEECH_REGION || "").trim();
+            const speechRegion = requestedRegion || envRegion || "";
             let speechKey = process.env.AZURE_SPEECH_KEY;
             const hdRegion = process.env.AZURE_SPEECH_REGION_HD;
             const hdKey = process.env.AZURE_SPEECH_KEY_HD;
@@ -49,6 +53,16 @@ export async function POST(req: Request) {
             if (!speechKey || !speechRegion) {
                 return NextResponse.json(
                     { error: "Azure Speech is not configured on the server." },
+                    { status: 400 }
+                );
+            }
+            if (!isValidAzureRegion(speechRegion)) {
+                return NextResponse.json(
+                    {
+                        error:
+                            `Invalid Azure Speech region '${speechRegion}'. ` +
+                            "Use a region like 'uksouth' or 'westeurope' (not an email or URL).",
+                    },
                     { status: 400 }
                 );
             }

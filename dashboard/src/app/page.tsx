@@ -32,6 +32,13 @@ type NewClientDraft = {
   intents_csv: string;
   default_intent: string;
 };
+type CreateClientMode = "industry_template" | "blank";
+type NewClientVoiceEntry = {
+  name: string;
+  provider: "elevenlabs" | "azure_neural";
+  voice_id?: string;
+  voice_name?: string;
+};
 
 type NodePickerAction = {
   type: "prompt" | "action" | "condition" | "knowledge" | "handoff";
@@ -114,6 +121,9 @@ export default function Home() {
     intents_csv: "",
     default_intent: "first_response",
   });
+  const [createClientMode, setCreateClientMode] = useState<CreateClientMode>("industry_template");
+  const [createClientTemplateSource, setCreateClientTemplateSource] = useState<string>("");
+  const [createClientVoices, setCreateClientVoices] = useState<NewClientVoiceEntry[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const loadRequestIdRef = useRef(0);
   const loadAbortRef = useRef<AbortController | null>(null);
@@ -595,6 +605,13 @@ export default function Home() {
       intents_csv: "",
       default_intent: "first_response",
     });
+    setCreateClientMode("industry_template");
+    setCreateClientTemplateSource("");
+    // Best-effort voice library load for dropdowns in the create dialog.
+    fetch("/api/config?type=voice_library", { cache: "no-store" })
+      .then((res) => res.ok ? res.json() : { voices: [] })
+      .then((json) => setCreateClientVoices(Array.isArray(json?.voices) ? json.voices : []))
+      .catch(() => setCreateClientVoices([]));
     setModalOpen(true);
   };
 
@@ -654,6 +671,10 @@ export default function Home() {
         }
       }
       payload.content = content;
+      payload.create_mode = createClientMode;
+      if (createClientMode === "industry_template" && createClientTemplateSource.trim()) {
+        payload.template_client = createClientTemplateSource.trim();
+      }
     } else if (modalType === 'copy_client') {
       payload.industry = modalData.industry;
       payload.client = modalData.sourceClient;
@@ -742,10 +763,15 @@ export default function Home() {
     const parsed = JSON.parse(editorContent);
     const rules = parsed?.intent_routing_rules || {};
     const intents: string[] = Array.isArray(parsed?.intents)
-      ? parsed.intents.filter((k: string) => k !== "general" && rules?.[k]?.enabled !== false)
+      ? parsed.intents.filter(
+        (k: string) => k !== "general" && (k === "first_response" || rules?.[k]?.enabled !== false)
+      )
       : [];
     const workflows: string[] = parsed?.workflows ? Object.keys(parsed.workflows).filter((k) => k !== "general") : [];
     const base: string[] = intents.length ? intents : workflows;
+    if (parsed?.workflows?.first_response && !base.includes("first_response")) {
+      base.push("first_response");
+    }
     return Array.from(new Set<string>(base));
   })();
   const filteredWorkflowKeys = workflowKeys.filter((k) => k.toLowerCase().includes(workflowFilter.trim().toLowerCase()));
@@ -826,14 +852,9 @@ export default function Home() {
       const saved = localStorage.getItem("dashboard:lastConfig");
       if (saved) {
         const [industry, client] = saved.split("::");
-        if (industry && list.industries.includes(industry)) {
-          if (client && (list.clients[industry] || []).includes(client)) {
-            loadConfig("client", industry, client);
-            loaded = true;
-          } else {
-            loadConfig("industry", industry);
-            loaded = true;
-          }
+        if (industry && client && list.industries.includes(industry) && (list.clients[industry] || []).includes(client)) {
+          loadConfig("client", industry, client);
+          loaded = true;
         }
       }
     } catch {
@@ -850,7 +871,8 @@ export default function Home() {
       if (firstClient) {
         loadConfig("client", firstIndustry, firstClient);
       } else {
-        loadConfig("industry", firstIndustry);
+        setInitialConfigLoaded(true);
+        return;
       }
     }
     setInitialConfigLoaded(true);
@@ -1464,7 +1486,7 @@ export default function Home() {
               {isSidebarCompact ? <ChevronRight size={16} /> : <ChevronDown size={16} />}
             </button>
             {isGlobalAdmin && (
-              <button onClick={openCreateIndustry} className="text-green-400 hover:text-green-300" title="Add Industry">
+              <button onClick={openCreateIndustry} className="text-green-400 hover:text-green-300 hidden" title="Add Industry">
                 <Plus size={20} />
               </button>
             )}
@@ -1478,7 +1500,7 @@ export default function Home() {
               <input
                 type="text"
                 className={`w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 ${isSidebarCompact ? "text-xs" : "text-sm"} text-white`}
-                placeholder="Filter clients or industries..."
+                placeholder="Filter clients..."
                 value={pickerClientSearch}
                 onChange={(e) => setPickerClientSearch(e.target.value)}
               />
@@ -1519,15 +1541,11 @@ export default function Home() {
                   <button
                     type="button"
                     onClick={() => {
-                      const industryForCreate = pickerIndustry || selectedIndustry;
-                      if (!industryForCreate) {
-                        alert("Select an industry first.");
-                        return;
-                      }
+                      const industryForCreate = pickerIndustry || selectedIndustry || "";
                       openCreateClient(industryForCreate);
                     }}
                     className="px-2 py-1.5 text-xs rounded border border-gray-600 text-gray-300 hover:text-white hover:border-blue-500"
-                    title="Create a new client in selected industry"
+                    title="Create a new client"
                   >
                     + New Client
                   </button>
@@ -2051,6 +2069,38 @@ export default function Home() {
                   </div>
                 </div>
 
+                <div>
+                  <label className="text-xs text-gray-400 block mb-1">Initialization</label>
+                  <select
+                    className="w-full bg-gray-900 border border-gray-600 rounded p-2 text-white"
+                    value={createClientMode}
+                    onChange={(e) => setCreateClientMode(e.target.value as CreateClientMode)}
+                  >
+                    <option value="industry_template">Use industry template</option>
+                    <option value="blank">Start blank client (first_response only)</option>
+                  </select>
+                </div>
+                {createClientMode === "industry_template" && (
+                  <div>
+                    <label className="text-xs text-gray-400 block mb-1">Template Source</label>
+                    <select
+                      className="w-full bg-gray-900 border border-gray-600 rounded p-2 text-white"
+                      value={createClientTemplateSource}
+                      onChange={(e) => setCreateClientTemplateSource(e.target.value)}
+                    >
+                      <option value="">Industry defaults</option>
+                      {((list?.clients?.[newClientDraft.industry] || []) as string[]).map((clientId) => (
+                        <option key={clientId} value={clientId}>
+                          Client template: {clientId}
+                        </option>
+                      ))}
+                    </select>
+                    <div className="text-[11px] text-gray-500 mt-1">
+                      Choose an existing client to clone structure from, or leave as Industry defaults.
+                    </div>
+                  </div>
+                )}
+
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="text-xs text-gray-400 block mb-1">Brand Name</label>
@@ -2155,7 +2205,12 @@ export default function Home() {
                     <select
                       className="w-full bg-gray-900 border border-gray-600 rounded p-2 text-white"
                       value={newClientDraft.tts_provider}
-                      onChange={(e) => setNewClientDraft((prev) => ({ ...prev, tts_provider: e.target.value as NewClientDraft["tts_provider"] }))}
+                      onChange={(e) => setNewClientDraft((prev) => ({
+                        ...prev,
+                        tts_provider: e.target.value as NewClientDraft["tts_provider"],
+                        elevenlabs_voice_id: e.target.value === "elevenlabs" ? prev.elevenlabs_voice_id : "",
+                        azure_voice_name: e.target.value === "azure_neural" ? prev.azure_voice_name : "",
+                      }))}
                     >
                       <option value="">Use system default</option>
                       <option value="elevenlabs">ElevenLabs</option>
@@ -2164,25 +2219,40 @@ export default function Home() {
                   </div>
                   {newClientDraft.tts_provider === "elevenlabs" && (
                     <div>
-                      <label className="text-xs text-gray-400 block mb-1">ElevenLabs Voice ID</label>
-                      <input
-                        type="text"
+                      <label className="text-xs text-gray-400 block mb-1">ElevenLabs Voice</label>
+                      <select
                         className="w-full bg-gray-900 border border-gray-600 rounded p-2 text-white"
                         value={newClientDraft.elevenlabs_voice_id}
                         onChange={(e) => setNewClientDraft((prev) => ({ ...prev, elevenlabs_voice_id: e.target.value }))}
-                      />
+                      >
+                        <option value="">Select ElevenLabs voice...</option>
+                        {createClientVoices
+                          .filter((v) => v.provider === "elevenlabs" && v.voice_id)
+                          .map((v) => (
+                            <option key={v.voice_id} value={v.voice_id}>
+                              {v.name || v.voice_id}
+                            </option>
+                          ))}
+                      </select>
                     </div>
                   )}
                   {newClientDraft.tts_provider === "azure_neural" && (
                     <div>
-                      <label className="text-xs text-gray-400 block mb-1">Azure Voice Name</label>
-                      <input
-                        type="text"
+                      <label className="text-xs text-gray-400 block mb-1">Azure Voice</label>
+                      <select
                         className="w-full bg-gray-900 border border-gray-600 rounded p-2 text-white"
                         value={newClientDraft.azure_voice_name}
                         onChange={(e) => setNewClientDraft((prev) => ({ ...prev, azure_voice_name: e.target.value }))}
-                        placeholder="en-GB-LibbyNeural"
-                      />
+                      >
+                        <option value="">Select Azure voice...</option>
+                        {createClientVoices
+                          .filter((v) => v.provider === "azure_neural" && v.voice_name)
+                          .map((v) => (
+                            <option key={v.voice_name} value={v.voice_name}>
+                              {v.name || v.voice_name}
+                            </option>
+                          ))}
+                      </select>
                     </div>
                   )}
                 </div>

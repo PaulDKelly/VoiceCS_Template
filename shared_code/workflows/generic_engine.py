@@ -147,7 +147,8 @@ def _process_node(node_id: str, nodes: list, edges: list, session: dict, config:
         if action_result:
             if action_result.get("prompt"):
                 # If a direct prompt is returned, stop traversal and reply immediately
-                session["current_node_id"] = None
+                next_node_id = action_result.get("next_node_id")
+                session["current_node_id"] = next_node_id if isinstance(next_node_id, str) and next_node_id else None
                 save_session(session_id, session)
                 return {"prompt": action_result["prompt"], "session": session, "config": config}
 
@@ -171,25 +172,34 @@ def _process_node(node_id: str, nodes: list, edges: list, session: dict, config:
         else:
             return {"prompt": "I've processed your request. Is there anything else? [HANGUP]", "session": session, "config": config}
 
-    # 3. Auto-skip placeholder start nodes (e.g. "Start knowledgebase") that have
-    # no prompt mapping. This prevents reading editor labels to callers.
+    # 3. Auto-skip utility nodes with no prompt mapping (e.g. Start/Decision/Condition).
+    # This prevents reading editor labels like "Decision" to callers.
     data = node.get("data", {}) or {}
     node_type = str(node.get("type") or "")
     label = str(data.get("label") or "").strip()
     prompt_key = data.get("promptKey")
     prompt_key_with_name = data.get("promptKeyWithName")
-    if (
+    capture_var = data.get("captureVariable")
+    label_lower = label.lower()
+    is_utility_node = (
         node_type in ("input", "custom_input")
+        or node_id.startswith("condition_")
+        or label_lower in {"decision", "condition", "route", "router", "branch", "switch"}
+    )
+    if (
+        is_utility_node
         and not prompt_key
         and not prompt_key_with_name
-        and label.lower().startswith("start")
+        and not capture_var
     ):
         outgoing = [e for e in edges if e["source"] == node_id]
         if outgoing:
-            next_id = outgoing[0]["target"]
-            session["current_node_id"] = next_id
-            save_session(session_id, session)
-            return _process_node(next_id, nodes, edges, session, config, session_id)
+            route_text = str(session.get("_last_user_input") or "")
+            next_id = _decide_next_node(route_text, outgoing, nodes, session, config)
+            if next_id:
+                session["current_node_id"] = next_id
+                save_session(session_id, session)
+                return _process_node(next_id, nodes, edges, session, config, session_id)
 
     # 4. Generate Prompt
     data = node.get("data", {}) or {}
@@ -402,8 +412,12 @@ def _execute_action(node: dict, session: dict, config: dict):
                 config.get("prompts", {}).get("intent_not_recognized")
                 or "Sorry, I’m not able to help with that. Is there anything else I can assist you with?"
             )
+            retry_node = action_config.get("retry_node")
+            if not retry_node and session.get("intent") == "first_response":
+                # Keep retry on intent question instead of restarting at greeting.
+                retry_node = "fr2"
             print("DEBUG: DetectIntent action found no intent. Using fallback prompt.", flush=True)
-            return {"prompt": fallback}
+            return {"prompt": fallback, "next_node_id": retry_node}
         print(f"DEBUG: DetectIntent action found: {intent}. Switching workflow.", flush=True)
         return {"handoff_intent": intent}
 
@@ -433,6 +447,7 @@ def _resolve_action_connection(action_config: dict, config: dict) -> tuple[dict,
     for field in [
         "type", "host", "port", "database", "username", "password", "password_env",
         "connection_string", "sqlite_path",
+        "sslmode", "sslrootcert", "sslcert", "sslkey",
         "supabase_url", "supabase_key", "supabase_key_env"
     ]:
         if action_config.get(field) not in (None, ""):
@@ -497,6 +512,10 @@ def _connect_db(conn_cfg: dict, db_type: str, timeout_seconds: float):
             "password": password,
             "connect_timeout": int(timeout_seconds),
         }
+        for ssl_key in ("sslmode", "sslrootcert", "sslcert", "sslkey"):
+            ssl_val = conn_cfg.get(ssl_key)
+            if ssl_val not in (None, ""):
+                kwargs[ssl_key] = ssl_val
         if conn_cfg.get("connection_string"):
             return psycopg2.connect(conn_cfg.get("connection_string"), connect_timeout=int(timeout_seconds)), "postgres"
         return psycopg2.connect(**kwargs), "postgres"
@@ -795,7 +814,12 @@ def _execute_supabase_rest_query(
 
 def _resolve_knowledge_connection(action_config: dict, config: dict) -> dict:
     connections = config.get("knowledge_base_connections") or {}
-    conn_ref = action_config.get("kb_connection_ref")
+    behavior = config.get("knowledge_base_behavior") or {}
+    conn_ref = (
+        action_config.get("kb_connection_ref")
+        or behavior.get("default_connection_ref")
+        or config.get("knowledge_base_default_connection")
+    )
     base = {}
     if conn_ref and isinstance(connections, dict):
         candidate = connections.get(conn_ref)
@@ -810,6 +834,7 @@ def _resolve_knowledge_connection(action_config: dict, config: dict) -> dict:
         "supabase_url", "supabase_key", "supabase_key_env",
         "host", "port", "database", "username", "password", "password_env",
         "connection_string", "schema", "query_sql",
+        "sslmode", "sslrootcert", "sslcert", "sslkey",
         "http_method", "body_template",
         "content_field", "title_field",
     ]:

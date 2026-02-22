@@ -53,6 +53,10 @@ type ClientConfig = {
         password_env?: string;
         connection_string?: string;
         sqlite_path?: string;
+        sslmode?: string;
+        sslrootcert?: string;
+        sslcert?: string;
+        sslkey?: string;
         supabase_url?: string;
         supabase_key?: string;
         supabase_key_env?: string;
@@ -76,6 +80,10 @@ type ClientConfig = {
         password_env?: string;
         connection_string?: string;
         schema?: string;
+        sslmode?: string;
+        sslrootcert?: string;
+        sslcert?: string;
+        sslkey?: string;
         query_sql?: string;
         http_method?: string;
         body_template?: string;
@@ -133,6 +141,8 @@ export default function ClientConfigForm({ jsonContent, onChange, assignedPhoneN
     const autoMigratedFirstResponseRef = useRef(false);
     const [dbTestStatus, setDbTestStatus] = useState<Record<string, "idle" | "loading" | "ok" | "error">>({});
     const [dbTestMessage, setDbTestMessage] = useState<Record<string, string>>({});
+    const [kbTestStatus, setKbTestStatus] = useState<Record<string, "idle" | "loading" | "ok" | "error">>({});
+    const [kbTestMessage, setKbTestMessage] = useState<Record<string, string>>({});
     const [importingProvider, setImportingProvider] = useState<"" | "azure_gb" | "elevenlabs">("");
     const [newVoice, setNewVoice] = useState<VoiceEntry>({
         name: "",
@@ -615,6 +625,29 @@ export default function ClientConfigForm({ jsonContent, onChange, assignedPhoneN
         } catch (err: any) {
             setDbTestStatus((prev) => ({ ...prev, [connKey]: "error" }));
             setDbTestMessage((prev) => ({ ...prev, [connKey]: err?.message || "Connection test failed." }));
+        }
+    };
+
+    const runKnowledgeBaseConnectionTest = async (connKey: string, conn: any) => {
+        setKbTestStatus((prev) => ({ ...prev, [connKey]: "loading" }));
+        setKbTestMessage((prev) => ({ ...prev, [connKey]: "" }));
+        try {
+            const res = await fetch("/api/knowledgebase/test", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ connection: conn }),
+            });
+            const data = await res.json().catch(() => null);
+            if (!res.ok || !data?.ok) {
+                setKbTestStatus((prev) => ({ ...prev, [connKey]: "error" }));
+                setKbTestMessage((prev) => ({ ...prev, [connKey]: data?.error || "Knowledge base connection test failed." }));
+                return;
+            }
+            setKbTestStatus((prev) => ({ ...prev, [connKey]: "ok" }));
+            setKbTestMessage((prev) => ({ ...prev, [connKey]: data?.message || "Knowledge base connection is reachable." }));
+        } catch (err: any) {
+            setKbTestStatus((prev) => ({ ...prev, [connKey]: "error" }));
+            setKbTestMessage((prev) => ({ ...prev, [connKey]: err?.message || "Knowledge base connection test failed." }));
         }
     };
 
@@ -1295,6 +1328,30 @@ export default function ClientConfigForm({ jsonContent, onChange, assignedPhoneN
                                             placeholder="Optional DSN/ODBC/URI"
                                         />
                                     </div>
+                                    {(conn.type || "postgres") === "postgres" && (
+                                        <div>
+                                            <label className="block text-xs text-gray-400 mb-1">SSL Mode</label>
+                                            <select
+                                                value={conn.sslmode || ""}
+                                                onChange={(e) => {
+                                                    const next = {
+                                                        ...(config.database_connections || {}),
+                                                        [connKey]: { ...(conn || {}), sslmode: e.target.value }
+                                                    };
+                                                    handleChange("database_connections", next);
+                                                }}
+                                                className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-white text-sm"
+                                            >
+                                                <option value="">(default)</option>
+                                                <option value="disable">disable</option>
+                                                <option value="allow">allow</option>
+                                                <option value="prefer">prefer</option>
+                                                <option value="require">require</option>
+                                                <option value="verify-ca">verify-ca</option>
+                                                <option value="verify-full">verify-full</option>
+                                            </select>
+                                        </div>
+                                    )}
                                     <div>
                                         <label className="block text-xs text-gray-400 mb-1">Host</label>
                                         <input
@@ -1403,6 +1460,60 @@ export default function ClientConfigForm({ jsonContent, onChange, assignedPhoneN
                                             placeholder="Recommended (e.g. DB_PASSWORD_MAIN)"
                                         />
                                     </div>
+                                    {(conn.type || "postgres") === "postgres" && (
+                                        <div>
+                                            <label className="block text-xs text-gray-400 mb-1">SSL Root Cert Path</label>
+                                            <input
+                                                type="text"
+                                                value={conn.sslrootcert || ""}
+                                                onChange={(e) => {
+                                                    const next = {
+                                                        ...(config.database_connections || {}),
+                                                        [connKey]: { ...(conn || {}), sslrootcert: e.target.value }
+                                                    };
+                                                    handleChange("database_connections", next);
+                                                }}
+                                                className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-white text-sm"
+                                                placeholder="Optional filesystem path"
+                                            />
+                                        </div>
+                                    )}
+                                    {(conn.type || "postgres") === "postgres" && (
+                                        <div>
+                                            <label className="block text-xs text-gray-400 mb-1">SSL Client Cert Path</label>
+                                            <input
+                                                type="text"
+                                                value={conn.sslcert || ""}
+                                                onChange={(e) => {
+                                                    const next = {
+                                                        ...(config.database_connections || {}),
+                                                        [connKey]: { ...(conn || {}), sslcert: e.target.value }
+                                                    };
+                                                    handleChange("database_connections", next);
+                                                }}
+                                                className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-white text-sm"
+                                                placeholder="Optional filesystem path"
+                                            />
+                                        </div>
+                                    )}
+                                    {(conn.type || "postgres") === "postgres" && (
+                                        <div className="col-span-2">
+                                            <label className="block text-xs text-gray-400 mb-1">SSL Client Key Path</label>
+                                            <input
+                                                type="text"
+                                                value={conn.sslkey || ""}
+                                                onChange={(e) => {
+                                                    const next = {
+                                                        ...(config.database_connections || {}),
+                                                        [connKey]: { ...(conn || {}), sslkey: e.target.value }
+                                                    };
+                                                    handleChange("database_connections", next);
+                                                }}
+                                                className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-white text-sm"
+                                                placeholder="Optional filesystem path"
+                                            />
+                                        </div>
+                                    )}
                                 </div>
                                 {dbTestStatus[connKey] === "ok" && dbTestMessage[connKey] && (
                                     <p className="text-xs text-green-400 mt-3">{dbTestMessage[connKey]}</p>
@@ -1446,17 +1557,27 @@ export default function ClientConfigForm({ jsonContent, onChange, assignedPhoneN
                             <div key={`kb-conn-${connKey}`} className="p-4 bg-gray-900 rounded border border-gray-700">
                                 <div className="flex items-center justify-between mb-3">
                                     <div className="text-sm font-semibold text-white">{connKey}</div>
-                                    <button
-                                        type="button"
-                                        onClick={() => {
-                                            const next = { ...(config.knowledge_base_connections || {}) };
-                                            delete next[connKey];
-                                            handleChange("knowledge_base_connections", next);
-                                        }}
-                                        className="text-xs px-2 py-1 rounded bg-red-800 hover:bg-red-700 text-white"
-                                    >
-                                        Remove
-                                    </button>
+                                    <div className="flex items-center gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={() => runKnowledgeBaseConnectionTest(connKey, conn)}
+                                            disabled={kbTestStatus[connKey] === "loading"}
+                                            className="text-xs px-2 py-1 rounded bg-emerald-700 hover:bg-emerald-600 text-white disabled:opacity-50"
+                                        >
+                                            {kbTestStatus[connKey] === "loading" ? "Testing..." : "Test Connection"}
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                const next = { ...(config.knowledge_base_connections || {}) };
+                                                delete next[connKey];
+                                                handleChange("knowledge_base_connections", next);
+                                            }}
+                                            className="text-xs px-2 py-1 rounded bg-red-800 hover:bg-red-700 text-white"
+                                        >
+                                            Remove
+                                        </button>
+                                    </div>
                                 </div>
                                 <div className="grid grid-cols-2 gap-3">
                                     <div>
@@ -1644,6 +1765,28 @@ export default function ClientConfigForm({ jsonContent, onChange, assignedPhoneN
                                                 />
                                             </div>
                                             <div>
+                                                <label className="block text-xs text-gray-400 mb-1">SSL Mode</label>
+                                                <select
+                                                    value={conn.sslmode || ""}
+                                                    onChange={(e) => {
+                                                        const next = {
+                                                            ...(config.knowledge_base_connections || {}),
+                                                            [connKey]: { ...(conn || {}), sslmode: e.target.value }
+                                                        };
+                                                        handleChange("knowledge_base_connections", next);
+                                                    }}
+                                                    className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-white text-sm"
+                                                >
+                                                    <option value="">(default)</option>
+                                                    <option value="disable">disable</option>
+                                                    <option value="allow">allow</option>
+                                                    <option value="prefer">prefer</option>
+                                                    <option value="require">require</option>
+                                                    <option value="verify-ca">verify-ca</option>
+                                                    <option value="verify-full">verify-full</option>
+                                                </select>
+                                            </div>
+                                            <div>
                                                 <label className="block text-xs text-gray-400 mb-1">Username</label>
                                                 <input
                                                     type="text"
@@ -1689,6 +1832,54 @@ export default function ClientConfigForm({ jsonContent, onChange, assignedPhoneN
                                                     }}
                                                     className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-white text-sm"
                                                     placeholder="Prefer env var in production"
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="block text-xs text-gray-400 mb-1">SSL Root Cert Path</label>
+                                                <input
+                                                    type="text"
+                                                    value={conn.sslrootcert || ""}
+                                                    onChange={(e) => {
+                                                        const next = {
+                                                            ...(config.knowledge_base_connections || {}),
+                                                            [connKey]: { ...(conn || {}), sslrootcert: e.target.value }
+                                                        };
+                                                        handleChange("knowledge_base_connections", next);
+                                                    }}
+                                                    className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-white text-sm"
+                                                    placeholder="Optional filesystem path"
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="block text-xs text-gray-400 mb-1">SSL Client Cert Path</label>
+                                                <input
+                                                    type="text"
+                                                    value={conn.sslcert || ""}
+                                                    onChange={(e) => {
+                                                        const next = {
+                                                            ...(config.knowledge_base_connections || {}),
+                                                            [connKey]: { ...(conn || {}), sslcert: e.target.value }
+                                                        };
+                                                        handleChange("knowledge_base_connections", next);
+                                                    }}
+                                                    className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-white text-sm"
+                                                    placeholder="Optional filesystem path"
+                                                />
+                                            </div>
+                                            <div className="col-span-2">
+                                                <label className="block text-xs text-gray-400 mb-1">SSL Client Key Path</label>
+                                                <input
+                                                    type="text"
+                                                    value={conn.sslkey || ""}
+                                                    onChange={(e) => {
+                                                        const next = {
+                                                            ...(config.knowledge_base_connections || {}),
+                                                            [connKey]: { ...(conn || {}), sslkey: e.target.value }
+                                                        };
+                                                        handleChange("knowledge_base_connections", next);
+                                                    }}
+                                                    className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-white text-sm"
+                                                    placeholder="Optional filesystem path"
                                                 />
                                             </div>
                                             <div className="col-span-2">
@@ -1808,9 +1999,15 @@ export default function ClientConfigForm({ jsonContent, onChange, assignedPhoneN
                                         </>
                                     )}
                                 </div>
+                                {kbTestStatus[connKey] === "ok" && kbTestMessage[connKey] && (
+                                    <p className="text-xs text-green-400 mt-3">{kbTestMessage[connKey]}</p>
+                                )}
+                                {kbTestStatus[connKey] === "error" && kbTestMessage[connKey] && (
+                                    <p className="text-xs text-red-400 mt-3">{kbTestMessage[connKey]}</p>
+                                )}
                             </div>
                         ))}
-                        <div>
+                        <div className="flex items-center gap-2">
                             <button
                                 type="button"
                                 onClick={() => {
@@ -1829,6 +2026,36 @@ export default function ClientConfigForm({ jsonContent, onChange, assignedPhoneN
                                 className="px-3 py-2 rounded text-xs bg-blue-700 hover:bg-blue-600 text-white"
                             >
                                 + Add Knowledge Base Connection
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    const existing = config.knowledge_base_connections || {};
+                                    let key = "test_kb";
+                                    if (existing[key]) {
+                                        let i = 2;
+                                        while (existing[`test_kb_${i}`]) i += 1;
+                                        key = `test_kb_${i}`;
+                                    }
+                                    handleChange("knowledge_base_connections", {
+                                        ...existing,
+                                        [key]: {
+                                            type: "postgres",
+                                            host: "aws-1-eu-west-1.pooler.supabase.com",
+                                            port: 5432,
+                                            database: "postgres",
+                                            schema: "public",
+                                            username: "postgres.<project_ref>",
+                                            password_env: "SUPABASE_DB_PASSWORD",
+                                            sslmode: "require",
+                                            query_sql: "SELECT content FROM kb_chunks WHERE content ILIKE '%' || {query_text} || '%' LIMIT {top_k}"
+                                        }
+                                    });
+                                }}
+                                className="px-3 py-2 rounded text-xs bg-emerald-700 hover:bg-emerald-600 text-white"
+                                title="Adds a prefilled Supabase PostgreSQL test KB connection"
+                            >
+                                + Add Test KB Connection
                             </button>
                         </div>
                     </div>

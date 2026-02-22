@@ -20,6 +20,13 @@ def _is_valid_azure_region(value: str) -> bool:
         return False
     return re.fullmatch(r"[a-z0-9-]{2,32}", region) is not None
 
+
+def _is_valid_locale(value: str) -> bool:
+    locale = str(value or "").strip()
+    if not locale:
+        return False
+    return re.fullmatch(r"[a-z]{2,3}-[A-Za-z]{2,4}", locale) is not None
+
 class TwilioBridge:
     def __init__(self, speech_key: str, speech_region: str, elevenlabs_api_key: str, voice_id: str = "21m00Tcm4TlvDq8ikWAM"):
         self.speech_key = speech_key
@@ -42,7 +49,8 @@ class TwilioBridge:
         
         # --- Azure STT Setup ---
         self.speech_config = speechsdk.SpeechConfig(subscription=speech_key, region=speech_region)
-        self.speech_config.speech_recognition_language = "en-US"
+        self.stt_language = os.getenv("AZURE_STT_LANGUAGE", "en-GB")
+        self.speech_config.speech_recognition_language = self.stt_language
         
         # Audio format expected from Twilio is 8kHz, but we will convert to 16kHz PCM for Azure for better quality?
         # Actually Azure handles 8kHz well if we tell it.
@@ -188,6 +196,16 @@ class TwilioBridge:
                             if azure_lang:
                                 self.azure_ssml_lang = azure_lang
 
+                            stt_language = (
+                                config.get("stt_language")
+                                or config.get("speech_recognition_language")
+                                or config.get("language")
+                            )
+                            if _is_valid_locale(stt_language):
+                                self.stt_language = stt_language
+                                self.speech_config.speech_recognition_language = self.stt_language
+                                logger.info(f"Using STT language for client {client_id}: {self.stt_language}")
+
                             azure_style = config.get("azure_voice_style")
                             if azure_style:
                                 self.azure_voice_style = azure_style
@@ -245,7 +263,7 @@ class TwilioBridge:
                     save_session(self.session_id, session)
                     logger.info(
                         f"Captured Session Context: Phone={from_number}, Client={client_id}, "
-                        f"Industry={industry}, TestWorkflow={test_workflow}"
+                        f"Industry={industry}, TestWorkflow={test_workflow}, STTLang={self.stt_language}"
                     )
 
                     if self._emit_sim_events and self.websocket:

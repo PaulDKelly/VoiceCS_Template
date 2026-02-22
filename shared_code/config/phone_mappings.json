@@ -1,8 +1,8 @@
 {
   "mappings": {
     "+441156473116": {
-      "client_id": "autonova",
-      "industry": "automotive"
+      "client_id": "retail_demo",
+      "industry": "Retail"
     }
   }
 }

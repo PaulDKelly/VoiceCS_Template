@@ -752,7 +752,7 @@ export async function POST(req: NextRequest) {
 
     try {
         const body = await req.json();
-        const { action = 'save', type, industry, client, content, newName } = body;
+        const { action = 'save', type, industry, client, content, newName, create_mode, template_client } = body;
 
         const userLabel = user.name || user.email || "unknown";
         console.log(`[API] POST action=${action} type=${type} industry=${industry} client=${client} user=${userLabel}`);
@@ -958,6 +958,8 @@ export async function POST(req: NextRequest) {
             if (!newName) return NextResponse.json({ error: 'New Name required' }, { status: 400 });
             const targetPath = getClientConfigPath(industry, newName);
             if (fs.existsSync(targetPath)) return NextResponse.json({ error: 'Client already exists' }, { status: 409 });
+            const createMode = String(create_mode || "industry_template").trim().toLowerCase();
+            const templateClient = String(template_client || "").trim();
             const requestedContent = (content && typeof content === "object" && !Array.isArray(content))
                 ? (content as Record<string, any>)
                 : null;
@@ -971,35 +973,70 @@ export async function POST(req: NextRequest) {
 
             // Default content
             let initialContent: Record<string, any> = { client_id: newName, industry };
-            try {
-                const defaultsPath = getIndustryConfigPath(industry);
-                if (fs.existsSync(defaultsPath)) {
-                    initialContent = readJsonFileSafe(defaultsPath) as Record<string, any>;
-                    initialContent.client_id = newName;
+            if (createMode !== "blank") {
+                if (templateClient) {
+                    try {
+                        const templatePath = getClientConfigPath(industry, templateClient);
+                        if (fs.existsSync(templatePath)) {
+                            initialContent = readJsonFileSafe(templatePath) as Record<string, any>;
+                            initialContent.client_id = newName;
+                            initialContent.industry = industry;
+                        }
+                    } catch (e) { }
                 }
-            } catch (e) { }
+                try {
+                    if (!templateClient || Object.keys(initialContent || {}).length <= 2) {
+                        const defaultsPath = getIndustryConfigPath(industry);
+                        if (fs.existsSync(defaultsPath)) {
+                            initialContent = readJsonFileSafe(defaultsPath) as Record<string, any>;
+                            initialContent.client_id = newName;
+                        }
+                    }
+                } catch (e) { }
+            } else {
+                initialContent = {
+                    client_id: newName,
+                    industry,
+                    intents: ["first_response"],
+                    workflows: {
+                        first_response: cloneDeep(defaultFirstResponseWorkflow()),
+                    },
+                    prompts: {},
+                };
+            }
 
             const bootstrap = buildBootstrapDefaults(industry);
-            const currentIntents = new Set<string>(Array.isArray(initialContent.intents) ? initialContent.intents : []);
-            currentIntents.delete("general");
-            if (!currentIntents.size) {
-                bootstrap.intents.forEach((i) => currentIntents.add(i));
-            }
-            if (!currentIntents.has("first_response")) currentIntents.add("first_response");
-            initialContent.intents = Array.from(currentIntents);
+            if (createMode !== "blank") {
+                const currentIntents = new Set<string>(Array.isArray(initialContent.intents) ? initialContent.intents : []);
+                currentIntents.delete("general");
+                if (!currentIntents.size) {
+                    bootstrap.intents.forEach((i) => currentIntents.add(i));
+                }
+                if (!currentIntents.has("first_response")) currentIntents.add("first_response");
+                initialContent.intents = Array.from(currentIntents);
 
-            initialContent.workflows = { ...(bootstrap.workflows || {}), ...(initialContent.workflows || {}) };
-            if (!initialContent.workflows.first_response) {
-                initialContent.workflows.first_response = cloneDeep(bootstrap.workflows.first_response || defaultFirstResponseWorkflow());
-            }
+                initialContent.workflows = { ...(bootstrap.workflows || {}), ...(initialContent.workflows || {}) };
+                if (!initialContent.workflows.first_response) {
+                    initialContent.workflows.first_response = cloneDeep(bootstrap.workflows.first_response || defaultFirstResponseWorkflow());
+                }
 
-            const mergedPrompts = { ...(bootstrap.prompts || {}), ...(initialContent.prompts || {}) };
-            const keySet = new Set<string>();
-            Object.values(initialContent.workflows || {}).forEach((wf: any) => collectPromptKeysFromWorkflow(wf).forEach((k) => keySet.add(k)));
-            for (const key of keySet) {
-                if (!mergedPrompts[key]) mergedPrompts[key] = "...";
+                const mergedPrompts = { ...(bootstrap.prompts || {}), ...(initialContent.prompts || {}) };
+                const keySet = new Set<string>();
+                Object.values(initialContent.workflows || {}).forEach((wf: any) => collectPromptKeysFromWorkflow(wf).forEach((k) => keySet.add(k)));
+                for (const key of keySet) {
+                    if (!mergedPrompts[key]) mergedPrompts[key] = "...";
+                }
+                initialContent.prompts = mergedPrompts;
+            } else {
+                const basePrompts = { ...(bootstrap.prompts || {}) };
+                const keySet = new Set<string>();
+                Object.values(initialContent.workflows || {}).forEach((wf: any) => collectPromptKeysFromWorkflow(wf).forEach((k) => keySet.add(k)));
+                for (const key of keySet) {
+                    if (!initialContent.prompts[key]) {
+                        initialContent.prompts[key] = basePrompts[key] || "...";
+                    }
+                }
             }
-            initialContent.prompts = mergedPrompts;
 
             // Set default voice from library if available
             let appliedDefaultVoice = false;
@@ -1080,13 +1117,15 @@ export async function POST(req: NextRequest) {
             }
 
             // Ensure selected intents have workflows from global template library.
-            const templateMap = loadGlobalWorkflowTemplateMap();
-            const configuredIntents = Array.isArray(initialContent.intents) ? initialContent.intents : [];
-            for (const rawIntent of configuredIntents) {
-                const intent = normalizeIntentName(String(rawIntent || ""));
-                if (!intent || intent === "general" || intent === "first_response") continue;
-                if (!initialContent.workflows?.[intent] && templateMap[intent]) {
-                    initialContent.workflows[intent] = cloneDeep(templateMap[intent]);
+            if (createMode !== "blank") {
+                const templateMap = loadGlobalWorkflowTemplateMap();
+                const configuredIntents = Array.isArray(initialContent.intents) ? initialContent.intents : [];
+                for (const rawIntent of configuredIntents) {
+                    const intent = normalizeIntentName(String(rawIntent || ""));
+                    if (!intent || intent === "general" || intent === "first_response") continue;
+                    if (!initialContent.workflows?.[intent] && templateMap[intent]) {
+                        initialContent.workflows[intent] = cloneDeep(templateMap[intent]);
+                    }
                 }
             }
 
