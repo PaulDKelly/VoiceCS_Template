@@ -3,10 +3,101 @@ import json
 import sqlite3
 import importlib
 from typing import Optional, Dict, Any
+from datetime import date as _date, datetime as _datetime
 from shared_code.utils.session import load_session, save_session
 from shared_code.utils.config_loader import load_merged_config
 from shared_code.llm.aoai_client import chat_completion
 import re
+
+_AFFIRMATIVE_WORDS = {
+    "yes", "yeah", "yep", "yup", "correct", "please", "ok", "okay", "sure", "go ahead",
+    "continue", "proceed", "book it", "do it", "that's right", "thats right"
+}
+_NEGATIVE_WORDS = {
+    "no", "nope", "nah", "not now", "don't", "dont", "stop", "cancel", "incorrect", "wrong"
+}
+
+def _to_date_spoken(d: _date) -> str:
+    return f"{d.day} {d.strftime('%B %Y')}"
+
+
+def _normalize_date_input(text: str) -> str:
+    cleaned = str(text or "").strip().lower()
+    cleaned = cleaned.replace(",", " ")
+    cleaned = re.sub(r"(\d{1,2})(st|nd|rd|th)\b", r"\1", cleaned)
+    cleaned = re.sub(r"\s{2,}", " ", cleaned).strip()
+    return cleaned
+
+
+def _parse_date_like(text: str) -> Optional[_date]:
+    raw = _normalize_date_input(text)
+    if not raw:
+        return None
+
+    formats = [
+        "%d/%m/%Y", "%d-%m-%Y", "%Y-%m-%d",
+        "%d %m %Y", "%d %B %Y", "%d %b %Y",
+        "%B %d %Y", "%b %d %Y",
+        "%d/%m/%y", "%d-%m-%y", "%d %m %y",
+    ]
+    for fmt in formats:
+        try:
+            return _datetime.strptime(raw, fmt).date()
+        except Exception:
+            pass
+
+    today = _date.today()
+    no_year_formats = ["%d/%m", "%d-%m", "%d %m", "%d %B", "%d %b", "%B %d", "%b %d"]
+    for fmt in no_year_formats:
+        try:
+            parsed = _datetime.strptime(raw, fmt).date().replace(year=today.year)
+            if parsed < today:
+                parsed = parsed.replace(year=today.year + 1)
+            return parsed
+        except Exception:
+            pass
+
+    return None
+
+
+def _parse_time_like(text: str) -> Optional[str]:
+    raw = str(text or "").strip().lower()
+    if not raw:
+        return None
+    m = re.search(r"\b(\d{1,2})(?:(:|\.)(\d{2}))?\s*(am|pm)?\b", raw)
+    if not m:
+        return None
+
+    hour = int(m.group(1))
+    minute = int(m.group(3)) if m.group(3) else 0
+    meridiem = m.group(4)
+
+    if minute < 0 or minute > 59:
+        return None
+
+    if meridiem:
+        if hour < 1 or hour > 12:
+            return None
+        if meridiem == "pm" and hour != 12:
+            hour += 12
+        if meridiem == "am" and hour == 12:
+            hour = 0
+    else:
+        if hour < 0 or hour > 23:
+            return None
+
+    return f"{hour:02d}:{minute:02d}"
+
+
+def _looks_like_date_correction(text: str) -> bool:
+    raw = _normalize_text(text)
+    if not raw:
+        return False
+    has_year = bool(re.search(r"\b(19|20)\d{2}\b", raw))
+    has_slash_or_dash_date = bool(re.search(r"\b\d{1,2}[/-]\d{1,2}([/-]\d{2,4})?\b", raw))
+    has_month = bool(re.search(r"\b(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)\w*\b", raw))
+    has_correction_phrase = any(p in raw for p in ("not", "instead", "actually", "i mean", "sorry"))
+    return has_year or has_slash_or_dash_date or has_month or has_correction_phrase
 
 def _is_valid_name(value: str) -> bool:
     if not value:
@@ -77,7 +168,65 @@ def handle_generic_workflow(session_id: str, text: str) -> dict:
         captured = text.strip()
         # Normalize common spoken punctuation artifacts from STT (e.g. "Paul Kelly.")
         captured = re.sub(r"[.!?,;:]+$", "", captured).strip()
-        if capture_var == "customer_name":
+        if capture_var == "preferredDate":
+            parsed_date = _parse_date_like(captured)
+            if not parsed_date:
+                save_session(session_id, session)
+                return {
+                    "prompt": "I did not catch the appointment date. Please say the date, for example 14 March 2026.",
+                    "session": session,
+                    "config": config,
+                }
+            today = _date.today()
+            if parsed_date < today:
+                save_session(session_id, session)
+                return {
+                    "prompt": (
+                        f"I cannot book dates in the past. Today is {_to_date_spoken(today)}. "
+                        "Please give me a date from today onward."
+                    ),
+                    "session": session,
+                    "config": config,
+                }
+            session[capture_var] = parsed_date.isoformat()
+            print(f"DEBUG: Captured normalized date '{session[capture_var]}' into variable '{capture_var}'", flush=True)
+        elif capture_var == "preferredTime":
+            # Handle date corrections while user is on the time slot question.
+            if _looks_like_date_correction(captured):
+                corrected_date = _parse_date_like(captured)
+                if corrected_date:
+                    today = _date.today()
+                    if corrected_date < today:
+                        save_session(session_id, session)
+                        return {
+                            "prompt": (
+                                f"Thanks for the correction. That date is in the past, and today is {_to_date_spoken(today)}. "
+                                "Please tell me a valid date first."
+                            ),
+                            "session": session,
+                            "config": config,
+                        }
+                    session["preferredDate"] = corrected_date.isoformat()
+                    save_session(session_id, session)
+                    return {
+                        "prompt": (
+                            f"Thanks, I have updated the date to {_to_date_spoken(corrected_date)}. "
+                            "What time would you like for the appointment?"
+                        ),
+                        "session": session,
+                        "config": config,
+                    }
+            parsed_time = _parse_time_like(captured)
+            if not parsed_time:
+                save_session(session_id, session)
+                return {
+                    "prompt": "I did not catch the appointment time. Please say a time, for example 10 30 AM.",
+                    "session": session,
+                    "config": config,
+                }
+            session[capture_var] = parsed_time
+            print(f"DEBUG: Captured normalized time '{session[capture_var]}' into variable '{capture_var}'", flush=True)
+        elif capture_var == "customer_name":
             if _is_valid_name(captured):
                 session[capture_var] = captured
                 session.pop("_name_retry", None)
@@ -288,6 +437,12 @@ def _process_node(node_id: str, nodes: list, edges: list, session: dict, config:
 def _decide_next_node(text: str, edges: list, nodes: list, session: dict, config: dict) -> Optional[str]:
     if len(edges) == 1:
         return edges[0]["target"]
+
+    binary = _classify_binary_response(text)
+    if binary:
+        matched = [e for e in edges if _edge_matches_binary(e, nodes, binary)]
+        if len(matched) == 1:
+            return matched[0]["target"]
     
     # Branching logic
     options = []
@@ -310,6 +465,38 @@ def _decide_next_node(text: str, edges: list, nodes: list, session: dict, config
         return best_id
     
     return edges[0]["target"] # Default fallback
+
+
+def _normalize_text(value: str) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9\s']", " ", str(value or "").lower())
+    cleaned = re.sub(r"\s{2,}", " ", cleaned).strip()
+    return cleaned
+
+
+def _classify_binary_response(text: str) -> Optional[str]:
+    cleaned = _normalize_text(text)
+    if not cleaned:
+        return None
+    if cleaned in _AFFIRMATIVE_WORDS:
+        return "yes"
+    if cleaned in _NEGATIVE_WORDS:
+        return "no"
+    if cleaned.startswith("yes ") or cleaned.startswith("yeah ") or cleaned.startswith("ok "):
+        return "yes"
+    if cleaned.startswith("no ") or cleaned.startswith("nah "):
+        return "no"
+    return None
+
+
+def _edge_matches_binary(edge: dict, nodes: list, binary: str) -> bool:
+    label = _normalize_text(edge.get("label", ""))
+    target = next((n for n in nodes if n.get("id") == edge.get("target")), {}) or {}
+    target_label = _normalize_text((target.get("data") or {}).get("label", ""))
+    combined = f"{label} {target_label}".strip()
+    yes_markers = ("yes", "proceed", "continue", "book", "confirm", "next")
+    no_markers = ("no", "cancel", "stop", "restart", "back", "not now")
+    markers = yes_markers if binary == "yes" else no_markers
+    return any(marker in combined for marker in markers)
 
 def _execute_action(node: dict, session: dict, config: dict):
     data = node.get("data", {})

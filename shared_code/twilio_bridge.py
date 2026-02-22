@@ -7,11 +7,16 @@ import audioop
 import websockets
 import time
 import re
+from typing import Optional
 import azure.cognitiveservices.speech as speechsdk
 from shared_code.agent.agent_engine import run_agent_step
 from shared_code.utils.call_trace import append_call_trace
 
 logger = logging.getLogger("twilio-bridge")
+
+
+def _to_bool(value) -> bool:
+    return str(value or "").strip().lower() in ("1", "true", "yes", "on")
 
 
 def _is_valid_azure_region(value: str) -> bool:
@@ -46,11 +51,28 @@ class TwilioBridge:
         self._speaking_started_at = 0.0
         self._barge_in_threshold_ms = 0
         self._barge_in_triggered = False
+        self.noise_mode = _to_bool(os.getenv("AZURE_STT_NOISE_MODE"))
+        self.min_stt_confidence = float(os.getenv("AZURE_STT_MIN_CONFIDENCE", "0.45"))
+        self._echo_guard_ms = int(os.getenv("AZURE_STT_ECHO_GUARD_MS", "900"))
+        self._post_tts_guard_until = 0.0
+        self._clarify_prompt = "Sorry, I caught background noise there. Could you repeat that briefly?"
         
         # --- Azure STT Setup ---
         self.speech_config = speechsdk.SpeechConfig(subscription=speech_key, region=speech_region)
         self.stt_language = os.getenv("AZURE_STT_LANGUAGE", "en-GB")
         self.speech_config.speech_recognition_language = self.stt_language
+        try:
+            if self.noise_mode:
+                self.speech_config.set_property(
+                    speechsdk.PropertyId.SpeechServiceConnection_InitialSilenceTimeoutMs,
+                    "1500",
+                )
+                self.speech_config.set_property(
+                    speechsdk.PropertyId.SpeechServiceConnection_EndSilenceTimeoutMs,
+                    "600",
+                )
+        except Exception:
+            logger.warning("Could not apply optional Azure STT silence timeout settings.")
         
         # Audio format expected from Twilio is 8kHz, but we will convert to 16kHz PCM for Azure for better quality?
         # Actually Azure handles 8kHz well if we tell it.
@@ -205,6 +227,32 @@ class TwilioBridge:
                                 self.stt_language = stt_language
                                 self.speech_config.speech_recognition_language = self.stt_language
                                 logger.info(f"Using STT language for client {client_id}: {self.stt_language}")
+                            # Optional per-client noise hardening toggles.
+                            if "stt_noise_mode" in config:
+                                self.noise_mode = _to_bool(config.get("stt_noise_mode"))
+                            if config.get("stt_min_confidence") not in (None, ""):
+                                try:
+                                    self.min_stt_confidence = float(config.get("stt_min_confidence"))
+                                except Exception:
+                                    pass
+                            if config.get("stt_echo_guard_ms") not in (None, ""):
+                                try:
+                                    self._echo_guard_ms = int(config.get("stt_echo_guard_ms"))
+                                except Exception:
+                                    pass
+                            custom_clarify = config.get("prompts", {}).get("stt_clarify")
+                            if isinstance(custom_clarify, str) and custom_clarify.strip():
+                                self._clarify_prompt = custom_clarify.strip()
+                            phrase_hints = config.get("stt_phrase_hints")
+                            if isinstance(phrase_hints, list) and phrase_hints:
+                                try:
+                                    grammar = speechsdk.PhraseListGrammar.from_recognizer(self.recognizer)
+                                    for phrase in phrase_hints[:100]:
+                                        phrase_text = str(phrase or "").strip()
+                                        if phrase_text:
+                                            grammar.addPhrase(phrase_text)
+                                except Exception:
+                                    logger.warning("Failed to apply STT phrase hints.")
 
                             azure_style = config.get("azure_voice_style")
                             if azure_style:
@@ -263,7 +311,8 @@ class TwilioBridge:
                     save_session(self.session_id, session)
                     logger.info(
                         f"Captured Session Context: Phone={from_number}, Client={client_id}, "
-                        f"Industry={industry}, TestWorkflow={test_workflow}, STTLang={self.stt_language}"
+                        f"Industry={industry}, TestWorkflow={test_workflow}, STTLang={self.stt_language}, "
+                        f"NoiseMode={self.noise_mode}, MinConf={self.min_stt_confidence}"
                     )
 
                     if self._emit_sim_events and self.websocket:
@@ -343,18 +392,82 @@ class TwilioBridge:
         if evt.result.reason == speechsdk.ResultReason.RecognizedSpeech:
             text = evt.result.text
             if text:
-                logger.info(f"User said: {text}")
+                confidence = self._extract_confidence(evt.result)
+                if confidence is not None:
+                    logger.info(f"User said: {text} (confidence={confidence:.2f})")
+                else:
+                    logger.info(f"User said: {text}")
                 # We need to bridge from Sync Callback -> Async Agent/TTS
+                if self._speaking and not self._barge_in_triggered:
+                    logger.info("Ignoring STT while TTS is still speaking.")
+                    return
                 if hasattr(self, 'loop'):
-                     asyncio.run_coroutine_threadsafe(self._process_text(text), self.loop)
+                     asyncio.run_coroutine_threadsafe(self._process_text(text, confidence=confidence), self.loop)
 
     def _on_canceled(self, evt):
         logger.warning(f"Speech canceled: {evt}")
 
-    async def _process_text(self, text):
+    def _extract_confidence(self, result) -> Optional[float]:
+        try:
+            raw = result.properties.get(speechsdk.PropertyId.SpeechServiceResponse_JsonResult)
+            if not raw:
+                return None
+            parsed = json.loads(raw)
+            nbest = parsed.get("NBest") or []
+            if not nbest:
+                return None
+            conf = nbest[0].get("Confidence")
+            return float(conf) if conf is not None else None
+        except Exception:
+            return None
+
+    def _is_likely_noise(self, text: str, confidence: Optional[float]) -> bool:
+        cleaned = re.sub(r"[^A-Za-z0-9\s]", " ", str(text or "")).strip().lower()
+        if not cleaned:
+            return True
+        if confidence is not None and confidence < self.min_stt_confidence:
+            return True
+        tokens = [t for t in cleaned.split() if t]
+        if not tokens:
+            return True
+        if len(tokens) == 1 and tokens[0] in {"uh", "um", "erm", "hmm", "mm", "mmm"}:
+            return True
+        if len(cleaned) <= 1:
+            return True
+        return False
+
+    async def _reprompt_for_noise(self):
+        if hasattr(self, "_hanging_up") and self._hanging_up:
+            return
+        prompt = self._clarify_prompt
+        self._barge_in_triggered = False
+        self._speaking = True
+        self._speaking_started_at = time.monotonic()
+        try:
+            if self.tts_provider in ("azure", "azure_neural", "azure_tts"):
+                used = await self._stream_azure_tts(prompt)
+                if not used:
+                    await self._stream_elevenlabs_tts_optimized(prompt)
+            else:
+                used = await self._stream_elevenlabs_tts_optimized(prompt)
+                if not used:
+                    await self._stream_azure_tts(prompt)
+        finally:
+            self._speaking = False
+            self._post_tts_guard_until = time.monotonic() + (max(self._echo_guard_ms, 0) / 1000.0)
+
+    async def _process_text(self, text, confidence: Optional[float] = None):
         if hasattr(self, "_hanging_up") and self._hanging_up:
             logger.info("Ignoring text input because call is hanging up.")
             return
+        if text != "__start__" and self.noise_mode:
+            if time.monotonic() < self._post_tts_guard_until:
+                logger.info("Ignoring STT during post-TTS echo guard window.")
+                return
+            if self._is_likely_noise(text, confidence):
+                logger.info("High-noise mode: asking caller to repeat.")
+                await self._reprompt_for_noise()
+                return
 
         # 1. Get Agent Response
         logger.info(f"Processing text: {text} | Session: {self.session_id}")
@@ -460,6 +573,7 @@ class TwilioBridge:
                         await self._stream_azure_tts(reply_text)
             finally:
                 self._speaking = False
+                self._post_tts_guard_until = time.monotonic() + (max(self._echo_guard_ms, 0) / 1000.0)
             
         if should_hangup:
             logger.info("Closing socket due to HANGUP signal.")
