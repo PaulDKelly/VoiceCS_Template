@@ -867,6 +867,43 @@ def _to_spoken_postcode(value: str) -> str:
     return ", ".join(list(compact))
 
 
+def _ordinal_day(n: int) -> str:
+    if 11 <= (n % 100) <= 13:
+        suffix = "th"
+    else:
+        suffix = {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+    return f"{n}{suffix}"
+
+
+def _to_spoken_date(value: str) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return raw
+
+    date_part = raw.split("T", 1)[0].split(" ", 1)[0]
+    parsed = None
+    for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y"):
+        try:
+            parsed = _datetime.strptime(date_part, fmt).date()
+            break
+        except Exception:
+            pass
+
+    # Also support already-human dates like "21 October 2024".
+    if not parsed:
+        normalized = re.sub(r"(\d{1,2})(st|nd|rd|th)\b", r"\1", raw, flags=re.IGNORECASE)
+        for fmt in ("%d %B %Y", "%d %b %Y"):
+            try:
+                parsed = _datetime.strptime(normalized, fmt).date()
+                break
+            except Exception:
+                pass
+
+    if not parsed:
+        return raw
+    return f"{_ordinal_day(parsed.day)} of {parsed.strftime('%B %Y')}"
+
+
 def _to_spoken_reference(value: str) -> str:
     raw = str(value or "").strip()
     if not raw:
@@ -889,6 +926,8 @@ def _to_spoken_value(var_name: str, value: str) -> str:
         return _to_spoken_phone(text)
     if "email" in name:
         return _to_spoken_email(text)
+    if any(k in name for k in ("date", "warranty_start", "warranty_end", "start_date", "end_date")):
+        return _to_spoken_date(text)
     if any(k in name for k in ("postcode", "post_code", "zip")):
         return _to_spoken_postcode(text)
     if any(k in name for k in ("reference", "ref", "ticket", "case", "order", "id")):
