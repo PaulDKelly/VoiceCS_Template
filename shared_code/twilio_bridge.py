@@ -454,6 +454,10 @@ class TwilioBridge:
         if hasattr(self, "_hanging_up") and self._hanging_up:
             return
         await self._speak_prompt(self._clarify_prompt)
+        # Let callers answer quickly after a noise clarify prompt.
+        self._post_tts_guard_until = time.monotonic() + 0.2
+        # Ensure we never go silent if STT misses the immediate retry.
+        self._schedule_no_response_reprompt()
 
     def _cancel_no_response_task(self):
         task = self._no_response_task
