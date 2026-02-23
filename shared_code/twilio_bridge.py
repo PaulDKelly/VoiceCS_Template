@@ -56,7 +56,7 @@ class TwilioBridge:
         self._echo_guard_ms = int(os.getenv("AZURE_STT_ECHO_GUARD_MS", "900"))
         self._post_tts_guard_until = 0.0
         self._clarify_prompt = "Sorry, I caught background noise there. Could you repeat that briefly?"
-        self._no_response_timeout_s = float(os.getenv("NO_RESPONSE_TIMEOUT_S", "4.5"))
+        self._no_response_timeout_s = float(os.getenv("NO_RESPONSE_TIMEOUT_S", "6.5"))
         self._no_response_reprompt_max = int(os.getenv("NO_RESPONSE_REPROMPT_MAX", "2"))
         self._no_response_reprompts = 0
         self._no_response_task = None
@@ -609,7 +609,10 @@ class TwilioBridge:
             logger.info(f"Agent reply: {reply_text}")
             # 2. Convert to Speech
             await self._speak_prompt(reply_text)
-            self._schedule_no_response_reprompt()
+            # Don't auto-reprompt immediately after the opening greeting;
+            # it can interrupt callers before they start speaking.
+            if text != "__start__":
+                self._schedule_no_response_reprompt()
             
         if should_hangup:
             logger.info("Closing socket due to HANGUP signal.")
