@@ -378,6 +378,17 @@ class TwilioBridge:
                             self._barge_in_triggered = True
                             logger.info(f"Barge-in triggered after {elapsed_ms:.0f}ms; stopping TTS.")
                             await self._send_clear_to_twilio()
+
+                elif event_type == "dtmf":
+                    digit = None
+                    try:
+                        digit = str((data.get("dtmf") or {}).get("digit") or "").strip()
+                    except Exception:
+                        digit = ""
+                    if digit:
+                        logger.info(f"Received DTMF digit: {digit}")
+                        if hasattr(self, 'loop'):
+                            asyncio.run_coroutine_threadsafe(self._process_text(f"dtmf:{digit}"), self.loop)
                     
                 elif event_type == "stop":
                     logger.info("Stream stopped by event")

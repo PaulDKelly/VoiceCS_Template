@@ -143,6 +143,47 @@ def _is_valid_email(text: str) -> bool:
     raw = str(text or "").strip()
     return re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", raw) is not None
 
+
+def _extract_dtmf_digit(text: str) -> Optional[str]:
+    raw = str(text or "").strip().lower()
+    if not raw:
+        return None
+    m = re.match(r"^dtmf\s*:\s*([0-9])$", raw)
+    if m:
+        return m.group(1)
+    if re.fullmatch(r"[0-9]", raw):
+        return raw
+    return None
+
+
+def _map_dtmf_to_intent(digit: str, config: dict) -> Optional[str]:
+    mapping = config.get("intent_dtmf_map")
+    if isinstance(mapping, dict):
+        target = mapping.get(str(digit))
+        return str(target).strip() if target else None
+
+    intents = set(config.get("intents") or [])
+    defaults = {
+        "1": "warranty",
+        "2": "service",
+        "3": "sales",
+        "4": "finance",
+        "5": "general",
+    }
+    candidate = defaults.get(str(digit))
+    if candidate in intents:
+        return candidate
+    return None
+
+
+def _first_response_intent_prompt(config: dict) -> str:
+    return (
+        config.get("prompts", {}).get("intent_capture_retry")
+        or "I did not catch that. Please say warranty, service, sales, finance, or general enquiry. "
+           "You can also press 1 for warranty, 2 for service, 3 for sales, 4 for finance."
+    )
+
+
 def _is_valid_name(value: str) -> bool:
     if not value:
         return False
@@ -332,6 +373,38 @@ def handle_generic_workflow(session_id: str, text: str) -> dict:
         else:
             session[capture_var] = captured
             print(f"DEBUG: Captured '{text}' into variable '{capture_var}'", flush=True)
+
+    # 3b. Strict first-response intent gating (prevents accidental auto-advance on noise/echo)
+    strict_first_response = bool(config.get("strict_first_response", True))
+    node_data = current_node.get("data", {}) or {}
+    node_prompt_key = str(node_data.get("promptKey") or "")
+    if (
+        strict_first_response
+        and session.get("intent") == "first_response"
+        and node_prompt_key == "first_response_ask_intent"
+    ):
+        user_text = str(text or "").strip()
+        if not user_text:
+            save_session(session_id, session)
+            return {"prompt": _first_response_intent_prompt(config), "session": session, "config": config}
+
+        digit = _extract_dtmf_digit(user_text)
+        if digit:
+            forced_intent = _map_dtmf_to_intent(digit, config)
+            if forced_intent:
+                session["_forced_intent"] = forced_intent
+            else:
+                save_session(session_id, session)
+                return {"prompt": _first_response_intent_prompt(config), "session": session, "config": config}
+        else:
+            from shared_code.routing.intent_router import detect_intent
+            detected_intent = detect_intent(
+                user_text, session.get("client_id"), session.get("industry"), allow_llm=False
+            )
+            if not detected_intent:
+                save_session(session_id, session)
+                return {"prompt": _first_response_intent_prompt(config), "session": session, "config": config}
+            session["_forced_intent"] = detected_intent
 
     # 4. Decide Next Node
     outgoing_edges = [e for e in edges if e["source"] == current_node_id]
@@ -671,6 +744,11 @@ def _execute_action(node: dict, session: dict, config: dict):
             print(f"DEBUG: ExtractName action discarded invalid name: {name}", flush=True)
 
     elif action_type == 'detect_intent':
+        forced_intent = session.pop("_forced_intent", None)
+        if forced_intent:
+            print(f"DEBUG: DetectIntent action using forced intent: {forced_intent}.", flush=True)
+            return {"handoff_intent": forced_intent}
+
         fixed_intent = action_config.get("fixed_intent") or action_config.get("target_intent")
         if fixed_intent:
             print(f"DEBUG: DetectIntent action using fixed intent: {fixed_intent}.", flush=True)
@@ -689,7 +767,7 @@ def _execute_action(node: dict, session: dict, config: dict):
             retry_node = action_config.get("retry_node")
             if not retry_node and session.get("intent") == "first_response":
                 # Keep retry on intent question instead of restarting at greeting.
-                retry_node = "fr2"
+                retry_node = "fr3"
             print("DEBUG: DetectIntent action found no intent. Using fallback prompt.", flush=True)
             return {"prompt": fallback, "next_node_id": retry_node}
         print(f"DEBUG: DetectIntent action found: {intent}. Switching workflow.", flush=True)
