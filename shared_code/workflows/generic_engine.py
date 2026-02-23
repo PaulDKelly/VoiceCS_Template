@@ -314,24 +314,38 @@ def handle_generic_workflow(session_id: str, text: str) -> dict:
             session[capture_var] = parsed_time
             print(f"DEBUG: Captured normalized time '{session[capture_var]}' into variable '{capture_var}'", flush=True)
         elif capture_var == "customer_name":
-            if _is_valid_name(captured):
-                session[capture_var] = captured
+            lowered = _normalize_text(captured)
+            skip_words = {
+                "skip", "continue", "continue without name", "without name",
+                "no name", "prefer not to say", "rather not say", "anonymous"
+            }
+            if lowered in skip_words or lowered.startswith("continue without"):
+                session["customer_name"] = ""
                 session.pop("_name_retry", None)
-                print(f"DEBUG: Captured '{text}' into variable '{capture_var}'", flush=True)
+                print("DEBUG: Caller chose to continue without name.", flush=True)
             else:
-                retries = int(session.get("_name_retry") or 0)
-                if retries < 1:
-                    session["_name_retry"] = retries + 1
+                extracted = captured
+                if lowered.startswith("my name is "):
+                    extracted = captured.split(" ", 3)[-1].strip()
+                if _is_valid_name(extracted):
+                    session[capture_var] = extracted
+                    session.pop("_name_retry", None)
+                    print(f"DEBUG: Captured '{extracted}' into variable '{capture_var}'", flush=True)
+                else:
+                    retries = int(session.get("_name_retry") or 0) + 1
+                    session["_name_retry"] = retries
                     save_session(session_id, session)
+                    if retries >= 3:
+                        return {
+                            "prompt": "I am still having trouble hearing your name. Please say your name slowly, or say continue without name.",
+                            "session": session,
+                            "config": config,
+                        }
                     return {
-                        "prompt": "Sorry, I didn’t catch your name — could you repeat it?",
+                        "prompt": "Sorry, I did not catch your name. Could you repeat it slowly?",
                         "session": session,
                         "config": config,
                     }
-                # Give up on name after one retry, proceed without it
-                session.pop("customer_name", None)
-                session.pop("_name_retry", None)
-                print(f"DEBUG: Invalid name '{text}' after retry; proceeding without name.", flush=True)
         elif any(k in capture_name for k in ("vehiclereg", "registration", "rego", "reg_number", "regnumber")):
             normalized_reg = _normalize_registration(captured)
             if not _is_valid_registration(normalized_reg):
@@ -1730,3 +1744,4 @@ def _execute_knowledge_search(action_config: dict, session: dict, config: dict):
         if error_prompt:
             return {"prompt": str(error_prompt)}
         return None
+

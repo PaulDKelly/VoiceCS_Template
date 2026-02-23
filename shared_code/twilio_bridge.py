@@ -62,6 +62,7 @@ class TwilioBridge:
         self._no_response_task = None
         self._last_user_speech_at = 0.0
         self._last_prompt_at = 0.0
+        self._expecting_name = False
         
         # --- Azure STT Setup ---
         self.speech_config = speechsdk.SpeechConfig(subscription=speech_key, region=speech_region)
@@ -450,9 +451,12 @@ class TwilioBridge:
         cleaned = re.sub(r"[^A-Za-z0-9\s]", " ", str(text or "")).strip().lower()
         if not cleaned:
             return True
+        tokens = [t for t in cleaned.split() if t]
+        if self._expecting_name and len(tokens) == 1 and re.fullmatch(r"[a-z][a-z' -]{1,30}", tokens[0]):
+            # During name capture, accept a plausible single-token name even with lower confidence.
+            return False
         if confidence is not None and confidence < self.min_stt_confidence:
             return True
-        tokens = [t for t in cleaned.split() if t]
         if not tokens:
             return True
         if len(tokens) == 1 and tokens[0] in {"uh", "um", "erm", "hmm", "mm", "mmm"}:
@@ -619,6 +623,14 @@ class TwilioBridge:
             should_hangup = True
             self._hanging_up = True # Block further inputs
             logger.info("Hangup signal detected. Blocking further input.")
+
+        if reply_text:
+            lower_reply = reply_text.lower()
+            self._expecting_name = (
+                "take your name" in lower_reply
+                or "catch your name" in lower_reply
+                or ("your name" in lower_reply and "repeat" in lower_reply)
+            )
         
         if reply_text:
             logger.info(f"Agent reply: {reply_text}")
