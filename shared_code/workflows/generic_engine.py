@@ -955,11 +955,40 @@ def _to_spoken_postcode(value: str) -> str:
 
 
 def _ordinal_day(n: int) -> str:
-    if 11 <= (n % 100) <= 13:
-        suffix = "th"
-    else:
-        suffix = {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
-    return f"{n}{suffix}"
+    spoken_ordinals = {
+        1: "first",
+        2: "second",
+        3: "third",
+        4: "fourth",
+        5: "fifth",
+        6: "sixth",
+        7: "seventh",
+        8: "eighth",
+        9: "ninth",
+        10: "tenth",
+        11: "eleventh",
+        12: "twelfth",
+        13: "thirteenth",
+        14: "fourteenth",
+        15: "fifteenth",
+        16: "sixteenth",
+        17: "seventeenth",
+        18: "eighteenth",
+        19: "nineteenth",
+        20: "twentieth",
+        21: "twenty first",
+        22: "twenty second",
+        23: "twenty third",
+        24: "twenty fourth",
+        25: "twenty fifth",
+        26: "twenty sixth",
+        27: "twenty seventh",
+        28: "twenty eighth",
+        29: "twenty ninth",
+        30: "thirtieth",
+        31: "thirty first",
+    }
+    return spoken_ordinals.get(int(n), str(n))
 
 
 def _to_spoken_date(value: str) -> str:
