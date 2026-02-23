@@ -56,6 +56,12 @@ class TwilioBridge:
         self._echo_guard_ms = int(os.getenv("AZURE_STT_ECHO_GUARD_MS", "900"))
         self._post_tts_guard_until = 0.0
         self._clarify_prompt = "Sorry, I caught background noise there. Could you repeat that briefly?"
+        self._no_response_timeout_s = float(os.getenv("NO_RESPONSE_TIMEOUT_S", "4.5"))
+        self._no_response_reprompt_max = int(os.getenv("NO_RESPONSE_REPROMPT_MAX", "2"))
+        self._no_response_reprompts = 0
+        self._no_response_task = None
+        self._last_user_speech_at = 0.0
+        self._last_prompt_at = 0.0
         
         # --- Azure STT Setup ---
         self.speech_config = speechsdk.SpeechConfig(subscription=speech_key, region=speech_region)
@@ -118,6 +124,10 @@ class TwilioBridge:
                 if event_type == "start":
                     self.stream_sid = data["start"]["streamSid"]
                     call_sid = data["start"].get("callSid")
+                    self._no_response_reprompts = 0
+                    self._last_user_speech_at = time.monotonic()
+                    self._last_prompt_at = 0.0
+                    self._cancel_no_response_task()
                     
                     # Use CallSid as Session ID (Persistent for the whole call), not StreamSid (ephemeral)
                     if call_sid:
@@ -386,6 +396,7 @@ class TwilioBridge:
         finally:
             logger.info("Cleaning up WebSocket and Recognizer")
             self._is_active = False
+            self._cancel_no_response_task()
             self.recognizer.stop_continuous_recognition()
 
     def _on_recognized(self, evt):
@@ -397,6 +408,9 @@ class TwilioBridge:
                     logger.info(f"User said: {text} (confidence={confidence:.2f})")
                 else:
                     logger.info(f"User said: {text}")
+                self._last_user_speech_at = time.monotonic()
+                self._no_response_reprompts = 0
+                self._cancel_no_response_task()
                 # We need to bridge from Sync Callback -> Async Agent/TTS
                 if self._speaking and not self._barge_in_triggered:
                     logger.info("Ignoring STT while TTS is still speaking.")
@@ -439,7 +453,43 @@ class TwilioBridge:
     async def _reprompt_for_noise(self):
         if hasattr(self, "_hanging_up") and self._hanging_up:
             return
-        prompt = self._clarify_prompt
+        await self._speak_prompt(self._clarify_prompt)
+
+    def _cancel_no_response_task(self):
+        task = self._no_response_task
+        if task and not task.done():
+            task.cancel()
+        self._no_response_task = None
+
+    def _schedule_no_response_reprompt(self):
+        self._cancel_no_response_task()
+        if self._no_response_timeout_s <= 0:
+            return
+
+        async def _watchdog():
+            try:
+                await asyncio.sleep(self._no_response_timeout_s)
+                if not self._is_active or (hasattr(self, "_hanging_up") and self._hanging_up):
+                    return
+                if self._speaking:
+                    return
+                if self._no_response_reprompts >= self._no_response_reprompt_max:
+                    return
+                if self._last_user_speech_at >= self._last_prompt_at:
+                    return
+                self._no_response_reprompts += 1
+                await self._speak_prompt("Sorry, I didn't catch that. Could you repeat that?")
+                self._schedule_no_response_reprompt()
+            except asyncio.CancelledError:
+                return
+            except Exception as e:
+                logger.warning(f"No-response watchdog failed: {e}")
+
+        self._no_response_task = asyncio.create_task(_watchdog())
+
+    async def _speak_prompt(self, prompt: str):
+        if hasattr(self, "_hanging_up") and self._hanging_up:
+            return
         self._barge_in_triggered = False
         self._speaking = True
         self._speaking_started_at = time.monotonic()
@@ -454,6 +504,7 @@ class TwilioBridge:
                     await self._stream_azure_tts(prompt)
         finally:
             self._speaking = False
+            self._last_prompt_at = time.monotonic()
             self._post_tts_guard_until = time.monotonic() + (max(self._echo_guard_ms, 0) / 1000.0)
 
     async def _process_text(self, text, confidence: Optional[float] = None):
@@ -557,23 +608,8 @@ class TwilioBridge:
         if reply_text:
             logger.info(f"Agent reply: {reply_text}")
             # 2. Convert to Speech
-            self._barge_in_triggered = False
-            self._speaking = True
-            self._speaking_started_at = time.monotonic()
-            try:
-                if self.tts_provider in ("azure", "azure_neural", "azure_tts"):
-                    used = await self._stream_azure_tts(reply_text)
-                    if not used:
-                        await self._stream_elevenlabs_tts_optimized(reply_text)
-                else:
-                    # Use optimized stream with Turbo model; fall back to Azure if ElevenLabs yields no audio.
-                    used = await self._stream_elevenlabs_tts_optimized(reply_text)
-                    if not used:
-                        logger.warning("ElevenLabs produced no audio, attempting Azure TTS fallback.")
-                        await self._stream_azure_tts(reply_text)
-            finally:
-                self._speaking = False
-                self._post_tts_guard_until = time.monotonic() + (max(self._echo_guard_ms, 0) / 1000.0)
+            await self._speak_prompt(reply_text)
+            self._schedule_no_response_reprompt()
             
         if should_hangup:
             logger.info("Closing socket due to HANGUP signal.")
