@@ -51,7 +51,7 @@ class TwilioBridge:
         self._speaking_started_at = 0.0
         self._barge_in_threshold_ms = 0
         self._barge_in_triggered = False
-        self.noise_mode = _to_bool(os.getenv("AZURE_STT_NOISE_MODE"))
+        self.noise_mode = _to_bool(os.getenv("AZURE_STT_NOISE_MODE", "1"))
         self.min_stt_confidence = float(os.getenv("AZURE_STT_MIN_CONFIDENCE", "0.45"))
         self._echo_guard_ms = int(os.getenv("AZURE_STT_ECHO_GUARD_MS", "900"))
         self._post_tts_guard_until = 0.0

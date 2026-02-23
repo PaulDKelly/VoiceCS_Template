@@ -18,7 +18,7 @@ _NEGATIVE_WORDS = {
 }
 
 def _to_date_spoken(d: _date) -> str:
-    return f"{d.day} {d.strftime('%B %Y')}"
+    return f"{_ordinal_day(d.day)} of {d.strftime('%B %Y')}"
 
 
 def _normalize_date_input(text: str) -> str:
@@ -99,6 +99,50 @@ def _looks_like_date_correction(text: str) -> bool:
     has_correction_phrase = any(p in raw for p in ("not", "instead", "actually", "i mean", "sorry"))
     return has_year or has_slash_or_dash_date or has_month or has_correction_phrase
 
+
+def _strip_correction_prefix(text: str) -> str:
+    raw = str(text or "").strip()
+    if not raw:
+        return raw
+    patterns = [
+        r"^\s*(?:no[, ]+)?i\s+meant\s+",
+        r"^\s*no[, ]+sorry[, ]+",
+        r"^\s*sorry[, ]+",
+        r"^\s*actually[, ]+",
+        r"^\s*correction[, ]+",
+        r"^\s*it(?:'s| is)\s+",
+    ]
+    out = raw
+    for pat in patterns:
+        out = re.sub(pat, "", out, flags=re.IGNORECASE)
+    return out.strip() or raw
+
+
+def _normalize_registration(text: str) -> str:
+    return re.sub(r"[^A-Za-z0-9]", "", str(text or "")).upper().strip()
+
+
+def _is_valid_registration(text: str) -> bool:
+    reg = _normalize_registration(text)
+    return bool(re.fullmatch(r"[A-Z0-9]{5,8}", reg))
+
+
+def _normalize_phone(text: str) -> str:
+    raw = str(text or "").strip()
+    if raw.startswith("+"):
+        return "+" + re.sub(r"\D", "", raw)
+    return re.sub(r"\D", "", raw)
+
+
+def _is_valid_phone(text: str) -> bool:
+    digits = re.sub(r"\D", "", str(text or ""))
+    return 10 <= len(digits) <= 15
+
+
+def _is_valid_email(text: str) -> bool:
+    raw = str(text or "").strip()
+    return re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", raw) is not None
+
 def _is_valid_name(value: str) -> bool:
     if not value:
         return False
@@ -166,8 +210,10 @@ def handle_generic_workflow(session_id: str, text: str) -> dict:
     capture_var = current_node.get("data", {}).get("captureVariable")
     if capture_var and text:
         captured = text.strip()
+        captured = _strip_correction_prefix(captured)
         # Normalize common spoken punctuation artifacts from STT (e.g. "Paul Kelly.")
         captured = re.sub(r"[.!?,;:]+$", "", captured).strip()
+        capture_name = str(capture_var or "").lower()
         if capture_var == "preferredDate":
             parsed_date = _parse_date_like(captured)
             if not parsed_date:
@@ -245,6 +291,44 @@ def handle_generic_workflow(session_id: str, text: str) -> dict:
                 session.pop("customer_name", None)
                 session.pop("_name_retry", None)
                 print(f"DEBUG: Invalid name '{text}' after retry; proceeding without name.", flush=True)
+        elif any(k in capture_name for k in ("vehiclereg", "registration", "rego", "reg_number", "regnumber")):
+            normalized_reg = _normalize_registration(captured)
+            if not _is_valid_registration(normalized_reg):
+                save_session(session_id, session)
+                return {
+                    "prompt": "I did not catch a valid registration. Please say it again slowly, for example N D 74 E P N.",
+                    "session": session,
+                    "config": config,
+                }
+            session[capture_var] = normalized_reg
+            print(f"DEBUG: Captured normalized reg '{normalized_reg}' into variable '{capture_var}'", flush=True)
+        elif any(k in capture_name for k in ("phone", "mobile", "contact", "tel")):
+            if "@" in captured and _is_valid_email(captured):
+                # If caller gives email in contact slot, keep it and continue.
+                session[capture_var] = captured.lower()
+                print(f"DEBUG: Captured email in contact slot '{capture_var}'", flush=True)
+            else:
+                normalized_phone = _normalize_phone(captured)
+                if not _is_valid_phone(normalized_phone):
+                    save_session(session_id, session)
+                    return {
+                        "prompt": "I did not catch a valid phone number. Please repeat it including area code.",
+                        "session": session,
+                        "config": config,
+                    }
+                session[capture_var] = normalized_phone
+                print(f"DEBUG: Captured normalized phone '{normalized_phone}' into variable '{capture_var}'", flush=True)
+        elif "email" in capture_name:
+            normalized_email = captured.lower()
+            if not _is_valid_email(normalized_email):
+                save_session(session_id, session)
+                return {
+                    "prompt": "I did not catch a valid email address. Please repeat it clearly.",
+                    "session": session,
+                    "config": config,
+                }
+            session[capture_var] = normalized_email
+            print(f"DEBUG: Captured normalized email '{normalized_email}' into variable '{capture_var}'", flush=True)
         else:
             session[capture_var] = captured
             print(f"DEBUG: Captured '{text}' into variable '{capture_var}'", flush=True)
@@ -410,11 +494,14 @@ def _process_node(node_id: str, nodes: list, edges: list, session: dict, config:
         # Default: session/config with dotted-path support (e.g. {db.phone})
         resolved = _resolve_template_var(var_name, session, config)
         if resolved is None:
-            return f"[{var_name}]"
+            return ""
         resolved_text = str(resolved)
         return _to_spoken_value(var_name, resolved_text)
 
     prompt = re.sub(r"\{([\w\.]+)\}", replace_var, prompt)
+    # Remove any remaining unresolved placeholders safely.
+    prompt = re.sub(r"\{[^{}]+\}", "", prompt)
+    prompt = re.sub(r"\[[^\[\]]+\]", "", prompt)
     # Clean up punctuation/spacing if {name} was empty
     prompt = re.sub(r",\s*([?.!])", r"\1", prompt)
     prompt = re.sub(r"\s+([?.!])", r"\1", prompt)
