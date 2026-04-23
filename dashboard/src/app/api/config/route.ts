@@ -124,6 +124,41 @@ function isValidLocale(value: string) {
     return /^[a-z]{2,3}-[A-Za-z]{2,4}$/.test(String(value || "").trim());
 }
 
+const FALLBACK_AZURE_VOICES: VoiceEntry[] = [
+    { provider: "azure_neural", voice_name: "en-GB-LibbyNeural", name: "Libby", locale: "en-GB", gender: "Female", default: false },
+    { provider: "azure_neural", voice_name: "en-GB-RyanNeural", name: "Ryan", locale: "en-GB", gender: "Male", default: false },
+    { provider: "azure_neural", voice_name: "en-US-JennyNeural", name: "Jenny", locale: "en-US", gender: "Female", default: false },
+    { provider: "azure_neural", voice_name: "en-US-GuyNeural", name: "Guy", locale: "en-US", gender: "Male", default: false },
+    { provider: "azure_neural", voice_name: "pt-PT-RaquelNeural", name: "Raquel", locale: "pt-PT", gender: "Female", default: false },
+    { provider: "azure_neural", voice_name: "pt-PT-DuarteNeural", name: "Duarte", locale: "pt-PT", gender: "Male", default: false },
+    { provider: "azure_neural", voice_name: "pt-BR-FranciscaNeural", name: "Francisca", locale: "pt-BR", gender: "Female", default: false },
+    { provider: "azure_neural", voice_name: "pt-BR-AntonioNeural", name: "Antonio", locale: "pt-BR", gender: "Male", default: false },
+    { provider: "azure_neural", voice_name: "es-ES-ElviraNeural", name: "Elvira", locale: "es-ES", gender: "Female", default: false },
+    { provider: "azure_neural", voice_name: "es-ES-AlvaroNeural", name: "Alvaro", locale: "es-ES", gender: "Male", default: false },
+    { provider: "azure_neural", voice_name: "es-MX-DaliaNeural", name: "Dalia", locale: "es-MX", gender: "Female", default: false },
+    { provider: "azure_neural", voice_name: "es-MX-JorgeNeural", name: "Jorge", locale: "es-MX", gender: "Male", default: false },
+    { provider: "azure_neural", voice_name: "fr-FR-DeniseNeural", name: "Denise", locale: "fr-FR", gender: "Female", default: false },
+    { provider: "azure_neural", voice_name: "fr-FR-HenriNeural", name: "Henri", locale: "fr-FR", gender: "Male", default: false },
+    { provider: "azure_neural", voice_name: "de-DE-KatjaNeural", name: "Katja", locale: "de-DE", gender: "Female", default: false },
+    { provider: "azure_neural", voice_name: "de-DE-ConradNeural", name: "Conrad", locale: "de-DE", gender: "Male", default: false },
+    { provider: "azure_neural", voice_name: "it-IT-ElsaNeural", name: "Elsa", locale: "it-IT", gender: "Female", default: false },
+    { provider: "azure_neural", voice_name: "it-IT-DiegoNeural", name: "Diego", locale: "it-IT", gender: "Male", default: false },
+    { provider: "azure_neural", voice_name: "nl-NL-ColetteNeural", name: "Colette", locale: "nl-NL", gender: "Female", default: false },
+    { provider: "azure_neural", voice_name: "nl-NL-MaartenNeural", name: "Maarten", locale: "nl-NL", gender: "Male", default: false },
+    { provider: "azure_neural", voice_name: "pl-PL-ZofiaNeural", name: "Zofia", locale: "pl-PL", gender: "Female", default: false },
+    { provider: "azure_neural", voice_name: "pl-PL-MarekNeural", name: "Marek", locale: "pl-PL", gender: "Male", default: false },
+    { provider: "azure_neural", voice_name: "ar-SA-ZariyahNeural", name: "Zariyah", locale: "ar-SA", gender: "Female", default: false },
+    { provider: "azure_neural", voice_name: "ar-SA-HamedNeural", name: "Hamed", locale: "ar-SA", gender: "Male", default: false },
+    { provider: "azure_neural", voice_name: "hi-IN-SwaraNeural", name: "Swara", locale: "hi-IN", gender: "Female", default: false },
+    { provider: "azure_neural", voice_name: "hi-IN-MadhurNeural", name: "Madhur", locale: "hi-IN", gender: "Male", default: false },
+    { provider: "azure_neural", voice_name: "ja-JP-NanamiNeural", name: "Nanami", locale: "ja-JP", gender: "Female", default: false },
+    { provider: "azure_neural", voice_name: "ja-JP-KeitaNeural", name: "Keita", locale: "ja-JP", gender: "Male", default: false },
+    { provider: "azure_neural", voice_name: "ko-KR-SunHiNeural", name: "SunHi", locale: "ko-KR", gender: "Female", default: false },
+    { provider: "azure_neural", voice_name: "ko-KR-InJoonNeural", name: "InJoon", locale: "ko-KR", gender: "Male", default: false },
+    { provider: "azure_neural", voice_name: "zh-CN-XiaoxiaoNeural", name: "Xiaoxiao", locale: "zh-CN", gender: "Female", default: false },
+    { provider: "azure_neural", voice_name: "zh-CN-YunxiNeural", name: "Yunxi", locale: "zh-CN", gender: "Male", default: false },
+];
+
 function loadVoiceLibrary(): { voices: VoiceEntry[] } {
     const p = getVoiceLibraryPath();
     if (!fs.existsSync(p)) return { voices: [] };
@@ -465,8 +500,12 @@ function upsertVoices(existing: VoiceEntry[], incoming: VoiceEntry[]) {
 async function importAzureVoices(locale?: string) {
     const region = (process.env.AZURE_SPEECH_REGION || "uksouth").trim();
     const key = process.env.AZURE_SPEECH_KEY;
+    const requestedLocale = String(locale || "").trim();
     if (!key) {
-        throw new Error("AZURE_SPEECH_KEY is not configured on the server.");
+        return FALLBACK_AZURE_VOICES.filter((v) => {
+            const voiceLocale = String(v.locale || inferAzureLocale(v.voice_name || "")).trim();
+            return !requestedLocale || voiceLocale.toLowerCase() === requestedLocale.toLowerCase();
+        });
     }
 
     const url = `https://${region}.tts.speech.microsoft.com/cognitiveservices/voices/list`;
@@ -958,7 +997,14 @@ export async function POST(req: NextRequest) {
                 console.warn("[Revision] Git commit failed:", String(e));
             }
 
-            return NextResponse.json({ success: true, provider, importedCount: imported.length, totalVoices: merged.length, voices: merged });
+            return NextResponse.json({
+                success: true,
+                provider,
+                importedCount: imported.length,
+                totalVoices: merged.length,
+                voices: merged,
+                fallback: (provider === 'azure' || provider === 'azure_neural' || provider === 'azure_gb' || provider === 'azure_neural_gb') && !process.env.AZURE_SPEECH_KEY,
+            });
         }
 
         // ... (Create/Delete logic remains similar but protected by admin check above) ...
@@ -1069,8 +1115,14 @@ export async function POST(req: NextRequest) {
                 const voiceLibPath = path.join(getConfigPath(), 'voice_library.json');
                 if (fs.existsSync(voiceLibPath)) {
                     const lib = readJsonFileSafe(voiceLibPath);
-                    const defaults = (lib.voices || []).filter((v: any) => v.default);
-                    const defaultVoice = defaults[0];
+                    const requestedLanguage = String(requestedContent?.language || initialContent.language || initialContent.azure_ssml_lang || "en-GB").trim();
+                    const voiceLocale = (v: any) => String(v?.locale || inferAzureLocale(String(v?.voice_name || ""))).trim();
+                    const matchesLanguage = (v: any) => {
+                        const locale = voiceLocale(v);
+                        return !locale || !requestedLanguage || locale.toLowerCase() === requestedLanguage.toLowerCase();
+                    };
+                    const voices = Array.isArray(lib.voices) ? lib.voices : [];
+                    const defaultVoice = voices.find((v: any) => v.default && matchesLanguage(v)) || voices.find(matchesLanguage);
                     if (defaultVoice) {
                         initialContent.tts_provider = defaultVoice.provider || initialContent.tts_provider || "elevenlabs";
                         if (defaultVoice.provider === "elevenlabs") {
@@ -1078,6 +1130,7 @@ export async function POST(req: NextRequest) {
                         }
                         if (defaultVoice.provider === "azure_neural") {
                             initialContent.azure_voice_name = defaultVoice.voice_name || initialContent.azure_voice_name;
+                            initialContent.voice_name = defaultVoice.voice_name || initialContent.voice_name;
                         }
                         appliedDefaultVoice = true;
                     }

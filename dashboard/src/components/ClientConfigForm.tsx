@@ -170,6 +170,7 @@ export default function ClientConfigForm({ jsonContent, onChange, assignedPhoneN
         provider: "elevenlabs",
         voice_id: "",
         voice_name: "",
+        locale: "",
         default: false
     });
 
@@ -207,19 +208,64 @@ export default function ClientConfigForm({ jsonContent, onChange, assignedPhoneN
         return (config.language || "en-GB").trim() || "en-GB";
     }
 
-    function isVoiceApplicableToLanguage(v: VoiceEntry): boolean {
-        const language = getSelectedLanguage().toLowerCase();
-        if (v.provider === "elevenlabs") return true;
-        const locale = getVoiceLocale(v).toLowerCase();
-        return !locale || locale === language;
+    function getAvailableVoices(provider: "elevenlabs" | "azure_neural", language = getSelectedLanguage()): VoiceEntry[] {
+        const selectedLanguage = language.toLowerCase();
+        return voiceLibrary.filter((v) => {
+            if (v.provider !== provider) return false;
+            const locale = getVoiceLocale(v).toLowerCase();
+            return !locale || locale === selectedLanguage;
+        });
+    }
+
+    function selectBestVoice(provider: "elevenlabs" | "azure_neural", language: string): VoiceEntry | null {
+        const available = getAvailableVoices(provider, language);
+        return available.find((v) => v.default) || available[0] || null;
+    }
+
+    function applyVoiceSelection(nextConfig: ClientConfig, provider: "elevenlabs" | "azure_neural", language: string): ClientConfig {
+        if (voiceLibrary.length === 0) return nextConfig;
+        const available = getAvailableVoices(provider, language);
+        if (provider === "elevenlabs") {
+            const current = nextConfig.elevenlabs_voice_id || "";
+            if (!current || !available.some((v) => v.voice_id === current)) {
+                const selected = selectBestVoice(provider, language);
+                return {
+                    ...nextConfig,
+                    elevenlabs_voice_id: selected?.voice_id || "",
+                };
+            }
+            return nextConfig;
+        }
+
+        const current = nextConfig.azure_voice_name || "";
+        if (!current || !available.some((v) => v.voice_name === current)) {
+            const selected = selectBestVoice(provider, language);
+            return {
+                ...nextConfig,
+                azure_voice_name: selected?.voice_name || "",
+                voice_name: selected?.voice_name || nextConfig.voice_name || "",
+            };
+        }
+        return nextConfig;
     }
 
     function handleLanguageChange(language: string) {
-        const newConfig = {
+        const provider = normalizeTtsProvider(config.tts_provider);
+        const newConfig = applyVoiceSelection({
             ...config,
             language,
             azure_ssml_lang: language,
-        };
+        }, provider, language);
+        setConfig(newConfig);
+        onChange(newConfig);
+    }
+
+    function handleTtsProviderChange(provider: "elevenlabs" | "azure_neural") {
+        const language = getSelectedLanguage();
+        const newConfig = applyVoiceSelection({
+            ...config,
+            tts_provider: provider,
+        }, provider, language);
         setConfig(newConfig);
         onChange(newConfig);
     }
@@ -260,6 +306,9 @@ export default function ClientConfigForm({ jsonContent, onChange, assignedPhoneN
             }
             const normalized = ((data?.voices || []) as VoiceEntry[]).map(v => ({ ...v, default: !!v.default }));
             setVoiceLibrary(normalized);
+            if (data?.fallback) {
+                setVoiceLibraryError("Azure Speech is not configured locally, so sample Azure voices were imported for dropdown testing. Add AZURE_SPEECH_KEY to test audio.");
+            }
         } catch (err) {
             setVoiceLibraryError("Failed to import voices.");
         } finally {
@@ -880,7 +929,7 @@ export default function ClientConfigForm({ jsonContent, onChange, assignedPhoneN
                             <label className="block text-sm font-medium text-gray-300 mb-2">TTS Provider</label>
                             <select
                                 value={normalizeTtsProvider(config.tts_provider)}
-                                onChange={(e) => handleChange("tts_provider", normalizeTtsProvider(e.target.value))}
+                                onChange={(e) => handleTtsProviderChange(normalizeTtsProvider(e.target.value))}
                                 className="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500"
                             >
                                 <option value="elevenlabs">ElevenLabs</option>
@@ -910,20 +959,23 @@ export default function ClientConfigForm({ jsonContent, onChange, assignedPhoneN
                                 >
                                     <option value="">-- Select Voice --</option>
                                     {!!config.elevenlabs_voice_id &&
-                                        voiceLibrary.filter(v => v.provider === "elevenlabs").every(v => (v.voice_id || "") !== config.elevenlabs_voice_id) && (
+                                        getAvailableVoices("elevenlabs").every(v => (v.voice_id || "") !== config.elevenlabs_voice_id) && (
                                             <option value={config.elevenlabs_voice_id}>
                                                 {`Current (not in library): ${config.elevenlabs_voice_id}`}
                                             </option>
                                         )}
-                                    {voiceLibrary.filter(v => v.provider === "elevenlabs" && isVoiceApplicableToLanguage(v)).map(v => (
+                                    {getAvailableVoices("elevenlabs").map(v => (
                                         <option key={v.voice_id || v.name} value={v.voice_id || ""}>
                                             {getVoiceDisplay(v)}{v.default ? " (Default)" : ""}
                                         </option>
                                     ))}
                                 </select>
                                 <p className="text-[10px] text-gray-500 mt-1">
-                                    {voiceLibrary.find(v => v.provider === "elevenlabs" && v.default) && (
-                                        <>Default for new clients: {getVoiceDisplay(voiceLibrary.find(v => v.provider === "elevenlabs" && v.default) as VoiceEntry)}</>
+                                    {selectBestVoice("elevenlabs", getSelectedLanguage()) && (
+                                        <>Default for {getSelectedLanguage()}: {getVoiceDisplay(selectBestVoice("elevenlabs", getSelectedLanguage()) as VoiceEntry)}</>
+                                    )}
+                                    {getAvailableVoices("elevenlabs").length === 0 && (
+                                        <>No ElevenLabs voices found for {getSelectedLanguage()}. Add a locale to matching voices or add one in Manage Voices.</>
                                     )}
                                 </p>
                             </div>
@@ -938,22 +990,22 @@ export default function ClientConfigForm({ jsonContent, onChange, assignedPhoneN
                                 >
                                     <option value="">-- Select Voice --</option>
                                     {!!config.azure_voice_name &&
-                                        voiceLibrary.filter(v => v.provider === "azure_neural" && isVoiceApplicableToLanguage(v)).every(v => (v.voice_name || "") !== config.azure_voice_name) && (
+                                        getAvailableVoices("azure_neural").every(v => (v.voice_name || "") !== config.azure_voice_name) && (
                                             <option value={config.azure_voice_name}>
                                                 {`Current (not in library): ${config.azure_voice_name}`}
                                             </option>
                                         )}
-                                    {voiceLibrary.filter(v => v.provider === "azure_neural" && isVoiceApplicableToLanguage(v)).map(v => (
+                                    {getAvailableVoices("azure_neural").map(v => (
                                         <option key={v.voice_name || v.name} value={v.voice_name || ""}>
                                             {getVoiceDisplay(v)}{v.default ? " (Default)" : ""}
                                         </option>
                                     ))}
                                 </select>
                                 <p className="text-[10px] text-gray-500 mt-1">
-                                    {voiceLibrary.find(v => v.provider === "azure_neural" && v.default) && (
-                                        <>Default for new clients: {getVoiceDisplay(voiceLibrary.find(v => v.provider === "azure_neural" && v.default) as VoiceEntry)}</>
+                                    {selectBestVoice("azure_neural", getSelectedLanguage()) && (
+                                        <>Default for {getSelectedLanguage()}: {getVoiceDisplay(selectBestVoice("azure_neural", getSelectedLanguage()) as VoiceEntry)}</>
                                     )}
-                                    {voiceLibrary.filter(v => v.provider === "azure_neural" && isVoiceApplicableToLanguage(v)).length === 0 && (
+                                    {getAvailableVoices("azure_neural").length === 0 && (
                                         <>No Azure voices found for {getSelectedLanguage()}. Use Manage Voices to import them.</>
                                     )}
                                 </p>
@@ -1073,8 +1125,8 @@ export default function ClientConfigForm({ jsonContent, onChange, assignedPhoneN
                                 <div className="space-y-2 mb-4">
                                     {voiceLibrary.map((v, idx) => (
                                         <div key={`${v.provider}-${v.voice_id || v.voice_name || idx}`} className="grid grid-cols-12 gap-2 items-center">
-                                            <div className="col-span-4 text-xs text-gray-300 truncate">{getVoiceDisplay(v)}</div>
-                                            <div className="col-span-4">
+                                            <div className="col-span-3 text-xs text-gray-300 truncate">{getVoiceDisplay(v)}</div>
+                                            <div className="col-span-3">
                                                 <input
                                                     type="text"
                                                     value={v.name || ""}
@@ -1085,6 +1137,19 @@ export default function ClientConfigForm({ jsonContent, onChange, assignedPhoneN
                                                     }}
                                                     className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs"
                                                     placeholder="Optional label"
+                                                />
+                                            </div>
+                                            <div className="col-span-2">
+                                                <input
+                                                    type="text"
+                                                    value={getVoiceLocale(v)}
+                                                    onChange={(e) => {
+                                                        const next = [...voiceLibrary];
+                                                        next[idx] = { ...next[idx], locale: e.target.value };
+                                                        setVoiceLibrary(next);
+                                                    }}
+                                                    className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs"
+                                                    placeholder="Locale"
                                                 />
                                             </div>
                                             <label className="col-span-2 text-xs text-gray-300 flex items-center gap-1">
@@ -1165,6 +1230,23 @@ export default function ClientConfigForm({ jsonContent, onChange, assignedPhoneN
                                             />
                                         </div>
                                     )}
+                                    <div className="col-span-2">
+                                        <label className="block text-xs text-gray-400 mb-1">Language Locale</label>
+                                        <select
+                                            value={newVoice.locale || getSelectedLanguage()}
+                                            onChange={(e) => setNewVoice({ ...newVoice, locale: e.target.value })}
+                                            className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-sm"
+                                        >
+                                            {!LANGUAGE_OPTIONS.some((language) => language.locale === (newVoice.locale || getSelectedLanguage())) && (
+                                                <option value={newVoice.locale || getSelectedLanguage()}>{newVoice.locale || getSelectedLanguage()}</option>
+                                            )}
+                                            {LANGUAGE_OPTIONS.map((language) => (
+                                                <option key={language.locale} value={language.locale}>
+                                                    {language.label} ({language.locale})
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </div>
                                     <label className="col-span-2 flex items-center gap-2 text-xs text-gray-300">
                                         <input
                                             type="checkbox"
@@ -1186,6 +1268,7 @@ export default function ClientConfigForm({ jsonContent, onChange, assignedPhoneN
                                                 const normalizedNewVoice: VoiceEntry = {
                                                     ...newVoice,
                                                     name: (newVoice.name || fallbackName).trim(),
+                                                    locale: (newVoice.locale || getSelectedLanguage()).trim(),
                                                     default: !!newVoice.default
                                                 };
                                                 const nextVoices = normalizedNewVoice.default
@@ -1193,7 +1276,7 @@ export default function ClientConfigForm({ jsonContent, onChange, assignedPhoneN
                                                     : voiceLibrary.concat(normalizedNewVoice);
                                                 const ok = await saveVoiceLibrary(nextVoices);
                                                 if (!ok) return;
-                                                setNewVoice({ name: "", provider: "elevenlabs", voice_id: "", voice_name: "", default: false });
+                                                setNewVoice({ name: "", provider: "elevenlabs", voice_id: "", voice_name: "", locale: "", default: false });
                                             }}
                                             className="px-3 py-1 rounded text-xs bg-purple-700 hover:bg-purple-600 text-white"
                                         >

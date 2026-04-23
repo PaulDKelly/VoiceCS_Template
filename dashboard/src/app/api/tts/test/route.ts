@@ -52,7 +52,7 @@ export async function POST(req: Request) {
 
             if (!speechKey || !speechRegion) {
                 return NextResponse.json(
-                    { error: "Azure Speech is not configured on the server." },
+                    { error: "Azure Speech audio testing needs AZURE_SPEECH_KEY and AZURE_SPEECH_REGION in dashboard/.env.local. The language and voice dropdowns can still be tested without them." },
                     { status: 400 }
                 );
             }
