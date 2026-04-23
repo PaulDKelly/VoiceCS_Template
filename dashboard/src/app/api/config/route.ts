@@ -519,7 +519,6 @@ async function importAzureVoices(locale?: string) {
     }
 
     const voices = await res.json().catch(() => []);
-    const requestedLocale = String(locale || "").trim();
     const imported = (Array.isArray(voices) ? voices : [])
         .filter((v: any) => {
             const voiceLocale = String(v?.Locale || "");
