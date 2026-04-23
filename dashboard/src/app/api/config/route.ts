@@ -13,6 +13,8 @@ type VoiceEntry = {
     provider: "elevenlabs" | "azure_neural";
     voice_id?: string;
     voice_name?: string;
+    locale?: string;
+    gender?: string;
     default?: boolean;
 };
 
@@ -96,6 +98,8 @@ function normalizeVoice(v: VoiceEntry): VoiceEntry | null {
             provider: "elevenlabs",
             voice_id: id,
             name: (v.name || id).trim(),
+            locale: (v.locale || "").trim() || undefined,
+            gender: (v.gender || "").trim() || undefined,
             default: !!v.default,
         };
     }
@@ -105,8 +109,19 @@ function normalizeVoice(v: VoiceEntry): VoiceEntry | null {
         provider: "azure_neural",
         voice_name: shortName,
         name: (v.name || shortName).trim(),
+        locale: (v.locale || inferAzureLocale(shortName)).trim() || undefined,
+        gender: (v.gender || "").trim() || undefined,
         default: !!v.default,
     };
+}
+
+function inferAzureLocale(shortName: string) {
+    const match = String(shortName || "").match(/^([a-z]{2,3}-[A-Z]{2,4})-/);
+    return match ? match[1] : "";
+}
+
+function isValidLocale(value: string) {
+    return /^[a-z]{2,3}-[A-Za-z]{2,4}$/.test(String(value || "").trim());
 }
 
 function loadVoiceLibrary(): { voices: VoiceEntry[] } {
@@ -438,6 +453,8 @@ function upsertVoices(existing: VoiceEntry[], incoming: VoiceEntry[]) {
             ...prev,
             voice_id: prev.voice_id || imported.voice_id,
             voice_name: prev.voice_name || imported.voice_name,
+            locale: prev.locale || imported.locale,
+            gender: prev.gender || imported.gender,
             name: prevIsPlaceholderId ? (importedName || prevName) : (prevName || importedName),
         });
     }
@@ -445,7 +462,7 @@ function upsertVoices(existing: VoiceEntry[], incoming: VoiceEntry[]) {
     return Array.from(map.values());
 }
 
-async function importAzureGbVoices() {
+async function importAzureVoices(locale?: string) {
     const region = (process.env.AZURE_SPEECH_REGION || "uksouth").trim();
     const key = process.env.AZURE_SPEECH_KEY;
     if (!key) {
@@ -463,22 +480,26 @@ async function importAzureGbVoices() {
     }
 
     const voices = await res.json().catch(() => []);
+    const requestedLocale = String(locale || "").trim();
     const imported = (Array.isArray(voices) ? voices : [])
         .filter((v: any) => {
-            const locale = String(v?.Locale || "");
+            const voiceLocale = String(v?.Locale || "");
             const shortName = String(v?.ShortName || "");
             const voiceType = String(v?.VoiceType || "");
             return (
-                locale === "en-GB" &&
+                (!requestedLocale || voiceLocale.toLowerCase() === requestedLocale.toLowerCase()) &&
                 (voiceType.toLowerCase() === "neural" || shortName.toLowerCase().includes("neural"))
             );
         })
         .map((v: any) => {
             const shortName = String(v?.ShortName || "").trim();
+            const voiceLocale = String(v?.Locale || inferAzureLocale(shortName)).trim();
             return {
                 provider: "azure_neural" as const,
                 voice_name: shortName,
-                name: shortName,
+                name: String(v?.DisplayName || v?.LocalName || shortName).trim(),
+                locale: voiceLocale || undefined,
+                gender: String(v?.Gender || "").trim() || undefined,
                 default: false,
             };
         });
@@ -905,8 +926,12 @@ export async function POST(req: NextRequest) {
 
             const provider = String(body?.provider || "").toLowerCase();
             let imported: VoiceEntry[] = [];
-            if (provider === 'azure_gb' || provider === 'azure_neural_gb') {
-                imported = await importAzureGbVoices();
+            if (provider === 'azure' || provider === 'azure_neural' || provider === 'azure_gb' || provider === 'azure_neural_gb') {
+                const locale = String(body?.locale || "").trim();
+                if (locale && !isValidLocale(locale)) {
+                    return NextResponse.json({ error: 'Invalid locale for import_voices' }, { status: 400 });
+                }
+                imported = await importAzureVoices(locale || (provider.includes('_gb') ? 'en-GB' : ''));
             } else if (provider === 'elevenlabs') {
                 imported = await importElevenLabsVoices();
             } else {
@@ -1092,6 +1117,7 @@ export async function POST(req: NextRequest) {
                     "brand_phone",
                     "tone",
                     "language",
+                    "azure_ssml_lang",
                     "tts_provider",
                     "elevenlabs_voice_id",
                     "azure_voice_name",

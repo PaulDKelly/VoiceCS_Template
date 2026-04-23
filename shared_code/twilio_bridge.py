@@ -64,10 +64,40 @@ class TwilioBridge:
         self._last_prompt_at = 0.0
         self._expecting_name = False
         
-        # --- Azure STT Setup ---
-        self.speech_config = speechsdk.SpeechConfig(subscription=speech_key, region=speech_region)
         self.stt_language = os.getenv("AZURE_STT_LANGUAGE", "en-GB")
-        self.speech_config.speech_recognition_language = self.stt_language
+
+        # Audio format expected from Twilio is 8kHz, but we will convert to 16kHz PCM for Azure for better quality?
+        # Actually Azure handles 8kHz well if we tell it.
+        # But Twilio sends MULAW. We must decode first.
+        self.audio_format = speechsdk.audio.AudioStreamFormat(samples_per_second=8000, bits_per_sample=16, channels=1)
+        self.speech_config = None
+        self.push_stream = None
+        self.audio_config = None
+        self.recognizer = None
+        self._build_stt_pipeline(self.stt_language)
+
+        self.websocket = None
+        self.stream_sid = None
+        self.session_id = None
+        self._is_active = False
+        self._emit_sim_events = False
+        self._recognition_started = False
+
+    def _start_recognition(self):
+        if self._recognition_started:
+            return
+        self.recognizer.start_continuous_recognition()
+        self._recognition_started = True
+
+    def _stop_recognition(self):
+        if not self._recognition_started:
+            return
+        self.recognizer.stop_continuous_recognition()
+        self._recognition_started = False
+
+    def _build_stt_pipeline(self, language: str):
+        self.speech_config = speechsdk.SpeechConfig(subscription=self.speech_key, region=self.speech_region)
+        self.speech_config.speech_recognition_language = language
         try:
             if self.noise_mode:
                 self.speech_config.set_property(
@@ -80,35 +110,27 @@ class TwilioBridge:
                 )
         except Exception:
             logger.warning("Could not apply optional Azure STT silence timeout settings.")
-        
-        # Audio format expected from Twilio is 8kHz, but we will convert to 16kHz PCM for Azure for better quality?
-        # Actually Azure handles 8kHz well if we tell it.
-        # But Twilio sends MULAW. We must decode first.
-        self.audio_format = speechsdk.audio.AudioStreamFormat(samples_per_second=8000, bits_per_sample=16, channels=1)
+
         self.push_stream = speechsdk.audio.PushAudioInputStream(stream_format=self.audio_format)
         self.audio_config = speechsdk.audio.AudioConfig(stream=self.push_stream)
-        
         self.recognizer = speechsdk.SpeechRecognizer(speech_config=self.speech_config, audio_config=self.audio_config)
-        
-        # Hook up events
         self.recognizer.recognized.connect(self._on_recognized)
-        # self.recognizer.recognizing.connect(self._on_recognizing) # Optional: Real-time feedback
         self.recognizer.canceled.connect(self._on_canceled)
-        
-        self.websocket = None
-        self.stream_sid = None
-        self.session_id = None
-        self._is_active = False
-        self._emit_sim_events = False
+
+    def _set_stt_language(self, language: str):
+        if not _is_valid_locale(language):
+            return
+        if self._recognition_started:
+            logger.warning("Ignoring STT language change after recognition has started.")
+            return
+        self.stt_language = language
+        self._build_stt_pipeline(language)
 
     async def handle_websocket(self, websocket):
         self.websocket = websocket
         self._is_active = True
         logger.info("Starting WebSocket loop")
-        
-        # Start Azure STT
-        self.recognizer.start_continuous_recognition()
-        
+
         # Get baseline from query params (passed from twilio_voice_handler in bot_main.py)
         # We need to adapt the websocket object or check if it has query_params
         # Since this is an adapter, we check if it has the attribute
@@ -226,7 +248,7 @@ class TwilioBridge:
                                     self.azure_speech_region = self.speech_region
 
                             azure_lang = config.get("azure_ssml_lang")
-                            if azure_lang:
+                            if _is_valid_locale(azure_lang):
                                 self.azure_ssml_lang = azure_lang
 
                             stt_language = (
@@ -235,8 +257,9 @@ class TwilioBridge:
                                 or config.get("language")
                             )
                             if _is_valid_locale(stt_language):
-                                self.stt_language = stt_language
-                                self.speech_config.speech_recognition_language = self.stt_language
+                                self._set_stt_language(stt_language)
+                                if not _is_valid_locale(azure_lang):
+                                    self.azure_ssml_lang = self.stt_language
                                 logger.info(f"Using STT language for client {client_id}: {self.stt_language}")
                             # Optional per-client noise hardening toggles.
                             if "stt_noise_mode" in config:
@@ -353,6 +376,10 @@ class TwilioBridge:
                         "test_workflow": test_workflow or "",
                     })
 
+                    # Start STT only after client config has been applied. Starting
+                    # earlier locks the recognizer to the default language.
+                    self._start_recognition()
+
                     # Warm Azure TTS cache for common prompts to reduce latency
                     if self.tts_provider in ("azure", "azure_neural", "azure_tts"):
                         try:
@@ -365,6 +392,8 @@ class TwilioBridge:
                     asyncio.create_task(self._process_text("__start__"))
                     
                 elif event_type == "media":
+                    if not self._recognition_started:
+                        self._start_recognition()
                     payload = data["media"]["payload"]
                     chunk = base64.b64decode(payload)
                     # Payload is MULAW 8000Hz. Azure PushStream configured for PCM 16-bit 8000Hz.
@@ -409,7 +438,7 @@ class TwilioBridge:
             logger.info("Cleaning up WebSocket and Recognizer")
             self._is_active = False
             self._cancel_no_response_task()
-            self.recognizer.stop_continuous_recognition()
+            self._stop_recognition()
 
     def _on_recognized(self, evt):
         if evt.result.reason == speechsdk.ResultReason.RecognizedSpeech:

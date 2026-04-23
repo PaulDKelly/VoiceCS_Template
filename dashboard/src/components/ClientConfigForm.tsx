@@ -106,8 +106,29 @@ type VoiceEntry = {
     provider: "elevenlabs" | "azure_neural";
     voice_id?: string;
     voice_name?: string;
+    locale?: string;
+    gender?: string;
     default: boolean;
 };
+
+const LANGUAGE_OPTIONS = [
+    { locale: "en-GB", label: "English (United Kingdom)" },
+    { locale: "en-US", label: "English (United States)" },
+    { locale: "pt-PT", label: "Portuguese (Portugal)" },
+    { locale: "pt-BR", label: "Portuguese (Brazil)" },
+    { locale: "es-ES", label: "Spanish (Spain)" },
+    { locale: "es-MX", label: "Spanish (Mexico)" },
+    { locale: "fr-FR", label: "French (France)" },
+    { locale: "de-DE", label: "German (Germany)" },
+    { locale: "it-IT", label: "Italian (Italy)" },
+    { locale: "nl-NL", label: "Dutch (Netherlands)" },
+    { locale: "pl-PL", label: "Polish (Poland)" },
+    { locale: "ar-SA", label: "Arabic (Saudi Arabia)" },
+    { locale: "hi-IN", label: "Hindi (India)" },
+    { locale: "ja-JP", label: "Japanese (Japan)" },
+    { locale: "ko-KR", label: "Korean (Korea)" },
+    { locale: "zh-CN", label: "Chinese Mandarin (Simplified)" },
+];
 
 type IntentEntry = {
     name: string;
@@ -143,7 +164,7 @@ export default function ClientConfigForm({ jsonContent, onChange, assignedPhoneN
     const [dbTestMessage, setDbTestMessage] = useState<Record<string, string>>({});
     const [kbTestStatus, setKbTestStatus] = useState<Record<string, "idle" | "loading" | "ok" | "error">>({});
     const [kbTestMessage, setKbTestMessage] = useState<Record<string, string>>({});
-    const [importingProvider, setImportingProvider] = useState<"" | "azure_gb" | "elevenlabs">("");
+    const [importingProvider, setImportingProvider] = useState<"" | "azure" | "elevenlabs">("");
     const [newVoice, setNewVoice] = useState<VoiceEntry>({
         name: "",
         provider: "elevenlabs",
@@ -170,7 +191,37 @@ export default function ClientConfigForm({ jsonContent, onChange, assignedPhoneN
             if (label && id && label !== id) return `${label} (${id})`;
             return id || label;
         }
-        return v.voice_name || v.name || "";
+        const label = v.name || v.voice_name || "";
+        const locale = getVoiceLocale(v);
+        return locale ? `${label} (${locale})` : label;
+    }
+
+    function getVoiceLocale(v: VoiceEntry): string {
+        if (v.locale) return v.locale;
+        const source = v.voice_name || "";
+        const match = source.match(/^([a-z]{2,3}-[A-Z]{2,4})-/);
+        return match ? match[1] : "";
+    }
+
+    function getSelectedLanguage(): string {
+        return (config.language || "en-GB").trim() || "en-GB";
+    }
+
+    function isVoiceApplicableToLanguage(v: VoiceEntry): boolean {
+        const language = getSelectedLanguage().toLowerCase();
+        if (v.provider === "elevenlabs") return true;
+        const locale = getVoiceLocale(v).toLowerCase();
+        return !locale || locale === language;
+    }
+
+    function handleLanguageChange(language: string) {
+        const newConfig = {
+            ...config,
+            language,
+            azure_ssml_lang: language,
+        };
+        setConfig(newConfig);
+        onChange(newConfig);
     }
 
     const saveVoiceLibrary = async (nextVoices: VoiceEntry[]) => {
@@ -188,14 +239,19 @@ export default function ClientConfigForm({ jsonContent, onChange, assignedPhoneN
         return true;
     };
 
-    const importVoices = async (provider: "azure_gb" | "elevenlabs") => {
+    const importVoices = async (provider: "azure" | "elevenlabs") => {
         try {
             setImportingProvider(provider);
             setVoiceLibraryError(null);
             const res = await fetch("/api/config", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ action: "import_voices", type: "voice_library", provider }),
+                body: JSON.stringify({
+                    action: "import_voices",
+                    type: "voice_library",
+                    provider: provider === "azure" ? "azure_neural" : provider,
+                    locale: provider === "azure" ? getSelectedLanguage() : undefined,
+                }),
             });
             const data = await res.json().catch(() => null);
             if (!res.ok) {
@@ -535,7 +591,7 @@ export default function ClientConfigForm({ jsonContent, onChange, assignedPhoneN
                     voiceId: config.elevenlabs_voice_id || "",
                     azureVoiceName: config.azure_voice_name || "",
                     azureRegion: config.azure_speech_region || "",
-                    azureLang: config.azure_ssml_lang || "",
+                    azureLang: config.azure_ssml_lang || config.language || "",
                     azureStyle: config.azure_voice_style || "",
                     azureStyleDegree: config.azure_voice_style_degree,
                     text: ttsTestText,
@@ -764,13 +820,23 @@ export default function ClientConfigForm({ jsonContent, onChange, assignedPhoneN
                         </div>
                         <div>
                             <label className="block text-sm font-medium text-gray-300 mb-2">Language</label>
-                            <input
-                                type="text"
-                                value={config.language || ""}
-                                onChange={(e) => handleChange("language", e.target.value)}
+                            <select
+                                value={getSelectedLanguage()}
+                                onChange={(e) => handleLanguageChange(e.target.value)}
                                 className="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500"
-                                placeholder="e.g., en-GB"
-                            />
+                            >
+                                {!LANGUAGE_OPTIONS.some((language) => language.locale === getSelectedLanguage()) && (
+                                    <option value={getSelectedLanguage()}>{getSelectedLanguage()}</option>
+                                )}
+                                {LANGUAGE_OPTIONS.map((language) => (
+                                    <option key={language.locale} value={language.locale}>
+                                        {language.label} ({language.locale})
+                                    </option>
+                                ))}
+                            </select>
+                            <p className="text-[10px] text-gray-500 mt-1">
+                                Used for speech recognition and Azure SSML. Import Azure voices after changing this.
+                            </p>
                         </div>
                     </div>
                 </section>
@@ -849,7 +915,7 @@ export default function ClientConfigForm({ jsonContent, onChange, assignedPhoneN
                                                 {`Current (not in library): ${config.elevenlabs_voice_id}`}
                                             </option>
                                         )}
-                                    {voiceLibrary.filter(v => v.provider === "elevenlabs").map(v => (
+                                    {voiceLibrary.filter(v => v.provider === "elevenlabs" && isVoiceApplicableToLanguage(v)).map(v => (
                                         <option key={v.voice_id || v.name} value={v.voice_id || ""}>
                                             {getVoiceDisplay(v)}{v.default ? " (Default)" : ""}
                                         </option>
@@ -872,12 +938,12 @@ export default function ClientConfigForm({ jsonContent, onChange, assignedPhoneN
                                 >
                                     <option value="">-- Select Voice --</option>
                                     {!!config.azure_voice_name &&
-                                        voiceLibrary.filter(v => v.provider === "azure_neural").every(v => (v.voice_name || "") !== config.azure_voice_name) && (
+                                        voiceLibrary.filter(v => v.provider === "azure_neural" && isVoiceApplicableToLanguage(v)).every(v => (v.voice_name || "") !== config.azure_voice_name) && (
                                             <option value={config.azure_voice_name}>
                                                 {`Current (not in library): ${config.azure_voice_name}`}
                                             </option>
                                         )}
-                                    {voiceLibrary.filter(v => v.provider === "azure_neural").map(v => (
+                                    {voiceLibrary.filter(v => v.provider === "azure_neural" && isVoiceApplicableToLanguage(v)).map(v => (
                                         <option key={v.voice_name || v.name} value={v.voice_name || ""}>
                                             {getVoiceDisplay(v)}{v.default ? " (Default)" : ""}
                                         </option>
@@ -886,6 +952,9 @@ export default function ClientConfigForm({ jsonContent, onChange, assignedPhoneN
                                 <p className="text-[10px] text-gray-500 mt-1">
                                     {voiceLibrary.find(v => v.provider === "azure_neural" && v.default) && (
                                         <>Default for new clients: {getVoiceDisplay(voiceLibrary.find(v => v.provider === "azure_neural" && v.default) as VoiceEntry)}</>
+                                    )}
+                                    {voiceLibrary.filter(v => v.provider === "azure_neural" && isVoiceApplicableToLanguage(v)).length === 0 && (
+                                        <>No Azure voices found for {getSelectedLanguage()}. Use Manage Voices to import them.</>
                                     )}
                                 </p>
                             </div>
@@ -910,7 +979,7 @@ export default function ClientConfigForm({ jsonContent, onChange, assignedPhoneN
                                 <label className="block text-sm font-medium text-gray-300 mb-2">Azure SSML Language</label>
                                 <input
                                     type="text"
-                                    value={config.azure_ssml_lang || ""}
+                                    value={config.azure_ssml_lang || config.language || ""}
                                     onChange={(e) => handleChange("azure_ssml_lang", e.target.value)}
                                     className="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500"
                                     placeholder="e.g., en-GB"
@@ -986,11 +1055,11 @@ export default function ClientConfigForm({ jsonContent, onChange, assignedPhoneN
                                 <div className="flex gap-2 mb-3">
                                     <button
                                         type="button"
-                                        onClick={async () => { await importVoices("azure_gb"); }}
+                                        onClick={async () => { await importVoices("azure"); }}
                                         disabled={importingProvider !== ""}
                                         className="px-3 py-1 rounded text-xs bg-emerald-700 hover:bg-emerald-600 text-white disabled:opacity-50"
                                     >
-                                        {importingProvider === "azure_gb" ? "Importing..." : "Import Azure GB Voices"}
+                                        {importingProvider === "azure" ? "Importing..." : `Import Azure Voices for ${getSelectedLanguage()}`}
                                     </button>
                                     <button
                                         type="button"

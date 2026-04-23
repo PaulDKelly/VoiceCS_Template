@@ -38,7 +38,27 @@ type NewClientVoiceEntry = {
   provider: "elevenlabs" | "azure_neural";
   voice_id?: string;
   voice_name?: string;
+  locale?: string;
 };
+
+const LANGUAGE_OPTIONS = [
+  { locale: "en-GB", label: "English (United Kingdom)" },
+  { locale: "en-US", label: "English (United States)" },
+  { locale: "pt-PT", label: "Portuguese (Portugal)" },
+  { locale: "pt-BR", label: "Portuguese (Brazil)" },
+  { locale: "es-ES", label: "Spanish (Spain)" },
+  { locale: "es-MX", label: "Spanish (Mexico)" },
+  { locale: "fr-FR", label: "French (France)" },
+  { locale: "de-DE", label: "German (Germany)" },
+  { locale: "it-IT", label: "Italian (Italy)" },
+  { locale: "nl-NL", label: "Dutch (Netherlands)" },
+  { locale: "pl-PL", label: "Polish (Poland)" },
+  { locale: "ar-SA", label: "Arabic (Saudi Arabia)" },
+  { locale: "hi-IN", label: "Hindi (India)" },
+  { locale: "ja-JP", label: "Japanese (Japan)" },
+  { locale: "ko-KR", label: "Korean (Korea)" },
+  { locale: "zh-CN", label: "Chinese Mandarin (Simplified)" },
+];
 
 type NodePickerAction = {
   type: "prompt" | "action" | "condition" | "knowledge" | "handoff";
@@ -615,6 +635,18 @@ export default function Home() {
     setModalOpen(true);
   };
 
+  const getVoiceLocale = (voice: NewClientVoiceEntry) => {
+    if (voice.locale) return voice.locale;
+    const match = String(voice.voice_name || "").match(/^([a-z]{2,3}-[A-Z]{2,4})-/);
+    return match ? match[1] : "";
+  };
+
+  const isCreateVoiceApplicable = (voice: NewClientVoiceEntry) => {
+    if (voice.provider === "elevenlabs") return true;
+    const locale = getVoiceLocale(voice);
+    return !locale || locale.toLowerCase() === newClientDraft.language.toLowerCase();
+  };
+
   const openCopyClient = (industry: string, client: string) => {
     setModalType('copy_client');
     setModalData({ industry, sourceClient: client });
@@ -654,7 +686,10 @@ export default function Home() {
       if (newClientDraft.agent_name.trim()) content.agent_name = newClientDraft.agent_name.trim();
       if (newClientDraft.opening_hours.trim()) content.opening_hours = newClientDraft.opening_hours.trim();
       if (newClientDraft.brand_phone.trim()) content.brand_phone = newClientDraft.brand_phone.trim();
-      if (newClientDraft.language.trim()) content.language = newClientDraft.language.trim();
+      if (newClientDraft.language.trim()) {
+        content.language = newClientDraft.language.trim();
+        content.azure_ssml_lang = newClientDraft.language.trim();
+      }
       if (newClientDraft.tone.trim()) content.tone = newClientDraft.tone.trim();
       if (intents.length) content.intents = Array.from(new Set(["first_response", ...intents]));
 
@@ -2134,13 +2169,20 @@ export default function Home() {
                   </div>
                   <div>
                     <label className="text-xs text-gray-400 block mb-1">Language</label>
-                    <input
-                      type="text"
+                    <select
                       className="w-full bg-gray-900 border border-gray-600 rounded p-2 text-white"
                       value={newClientDraft.language}
                       onChange={(e) => setNewClientDraft((prev) => ({ ...prev, language: e.target.value }))}
-                      placeholder="en-GB"
-                    />
+                    >
+                      {!LANGUAGE_OPTIONS.some((language) => language.locale === newClientDraft.language) && (
+                        <option value={newClientDraft.language}>{newClientDraft.language}</option>
+                      )}
+                      {LANGUAGE_OPTIONS.map((language) => (
+                        <option key={language.locale} value={language.locale}>
+                          {language.label} ({language.locale})
+                        </option>
+                      ))}
+                    </select>
                   </div>
                 </div>
 
@@ -2227,7 +2269,7 @@ export default function Home() {
                       >
                         <option value="">Select ElevenLabs voice...</option>
                         {createClientVoices
-                          .filter((v) => v.provider === "elevenlabs" && v.voice_id)
+                          .filter((v) => v.provider === "elevenlabs" && v.voice_id && isCreateVoiceApplicable(v))
                           .map((v) => (
                             <option key={v.voice_id} value={v.voice_id}>
                               {v.name || v.voice_id}
@@ -2246,7 +2288,7 @@ export default function Home() {
                       >
                         <option value="">Select Azure voice...</option>
                         {createClientVoices
-                          .filter((v) => v.provider === "azure_neural" && v.voice_name)
+                          .filter((v) => v.provider === "azure_neural" && v.voice_name && isCreateVoiceApplicable(v))
                           .map((v) => (
                             <option key={v.voice_name} value={v.voice_name}>
                               {v.name || v.voice_name}
