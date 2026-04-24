@@ -178,10 +178,45 @@ def _map_dtmf_to_intent(digit: str, config: dict) -> Optional[str]:
 
 def _first_response_intent_prompt(config: dict) -> str:
     return (
-        config.get("prompts", {}).get("intent_capture_retry")
+        _get_prompt_template(config, "intent_capture_retry")
         or "I did not catch that. Please say warranty, service, sales, finance, or general enquiry. "
            "You can also press 1 for warranty, 2 for service, 3 for sales, 4 for finance."
     )
+
+
+def _get_prompt_language(config: dict) -> str:
+    return str(
+        config.get("language")
+        or config.get("azure_ssml_lang")
+        or config.get("stt_language")
+        or ""
+    ).strip()
+
+
+def _get_prompt_template(config: dict, prompt_key: str) -> Optional[str]:
+    if not prompt_key:
+        return None
+
+    prompts_i18n = config.get("prompts_i18n") or {}
+    language = _get_prompt_language(config)
+    candidates = []
+    if language:
+        candidates.append(language)
+        base_language = language.split("-")[0].strip()
+        if base_language and base_language.lower() != language.lower():
+            candidates.append(base_language)
+
+    for locale in candidates:
+        localized_prompts = prompts_i18n.get(locale)
+        if isinstance(localized_prompts, dict):
+            value = localized_prompts.get(prompt_key)
+            if isinstance(value, str) and value.strip() and value.strip() != "...":
+                return value
+
+    prompt_value = config.get("prompts", {}).get(prompt_key)
+    if isinstance(prompt_value, str) and prompt_value.strip() and prompt_value.strip() != "...":
+        return prompt_value
+    return None
 
 
 def _is_valid_name(value: str) -> bool:
@@ -534,7 +569,7 @@ def _process_node(node_id: str, nodes: list, edges: list, session: dict, config:
     ):
         prompt_key = prompt_key_with_name
     if prompt_key:
-        prompt_value = config.get("prompts", {}).get(prompt_key)
+        prompt_value = _get_prompt_template(config, str(prompt_key))
         if isinstance(prompt_value, str) and prompt_value.strip() and prompt_value.strip() != "...":
             prompt = prompt_value
         else:

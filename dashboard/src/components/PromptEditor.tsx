@@ -12,15 +12,32 @@ interface PromptEditorProps {
 
 export default function PromptEditor({ jsonContent, onChange, globalPrompts, canManagePromptLibrary }: PromptEditorProps) {
     const [prompts, setPrompts] = useState<Record<string, string>>({});
+    const [promptsI18n, setPromptsI18n] = useState<Record<string, Record<string, string>>>({});
     const [selectedTab, setSelectedTab] = useState("all");
+    const [selectedLocale, setSelectedLocale] = useState<string>("default");
     const [intents, setIntents] = useState<string[]>([]);
 
+    const currentLanguage = String(jsonContent?.language || "").trim();
+    const availableLocales = Array.from(new Set([
+        "default",
+        currentLanguage,
+        ...Object.keys(promptsI18n || {}),
+    ].filter(Boolean)));
+    const activeLocalizedPrompts =
+        selectedLocale !== "default" && promptsI18n[selectedLocale]
+            ? promptsI18n[selectedLocale]
+            : {};
+
     // Combine Local + Global for display
-    const allKeys = Array.from(new Set([...Object.keys(prompts), ...Object.keys(globalPrompts || {})]));
+    const allKeys = Array.from(new Set([
+        ...Object.keys(prompts),
+        ...Object.keys(globalPrompts || {}),
+        ...Object.keys(activeLocalizedPrompts),
+    ]));
     const effectivePrompts: Record<string, { val: string, isGlobal: boolean, isOverride: boolean }> = {};
 
     allKeys.forEach(key => {
-        const local = prompts[key];
+        const local = activeLocalizedPrompts[key] ?? prompts[key];
         const global = globalPrompts?.[key];
 
         if (local !== undefined) {
@@ -41,8 +58,15 @@ export default function PromptEditor({ jsonContent, onChange, globalPrompts, can
 
     useEffect(() => {
         setPrompts(jsonContent.prompts || {});
+        setPromptsI18n(jsonContent.prompts_i18n || {});
         setIntents((jsonContent.intents || []).filter((intent: string) => intent !== "general"));
     }, [jsonContent]);
+
+    useEffect(() => {
+        if (selectedLocale === "default") return;
+        if (availableLocales.includes(selectedLocale)) return;
+        setSelectedLocale(currentLanguage || "default");
+    }, [selectedLocale, currentLanguage, availableLocales]);
 
     useEffect(() => {
         fetch(`/api/config?type=prompt_library&_t=${Date.now()}`)
@@ -55,9 +79,17 @@ export default function PromptEditor({ jsonContent, onChange, globalPrompts, can
     }, []);
 
     const handleUpdate = (key: string, val: string) => {
+        if (selectedLocale !== "default") {
+            const nextLocalePrompts = { ...(promptsI18n[selectedLocale] || {}), [key]: val };
+            const nextPromptsI18n = { ...promptsI18n, [selectedLocale]: nextLocalePrompts };
+            setPromptsI18n(nextPromptsI18n);
+            onChange({ ...jsonContent, prompts, prompts_i18n: nextPromptsI18n });
+            return;
+        }
+
         const updated = { ...prompts, [key]: val };
         setPrompts(updated);
-        onChange({ ...jsonContent, prompts: updated });
+        onChange({ ...jsonContent, prompts: updated, prompts_i18n: promptsI18n });
     };
 
     const handleAdd = () => {
@@ -92,9 +124,18 @@ export default function PromptEditor({ jsonContent, onChange, globalPrompts, can
     };
 
     const handleDelete = (key: string) => {
+        if (selectedLocale !== "default") {
+            const localePrompts = { ...(promptsI18n[selectedLocale] || {}) };
+            const { [key]: _, ...restLocale } = localePrompts;
+            const nextPromptsI18n = { ...promptsI18n, [selectedLocale]: restLocale };
+            setPromptsI18n(nextPromptsI18n);
+            onChange({ ...jsonContent, prompts, prompts_i18n: nextPromptsI18n });
+            return;
+        }
+
         const { [key]: _, ...rest } = prompts;
         setPrompts(rest);
-        onChange({ ...jsonContent, prompts: rest });
+        onChange({ ...jsonContent, prompts: rest, prompts_i18n: promptsI18n });
     };
 
     // Filter prompts based on selected tab
@@ -118,7 +159,21 @@ export default function PromptEditor({ jsonContent, onChange, globalPrompts, can
                     <MessageSquare size={20} />
                     Prompt Manager
                 </h3>
-                <div className="flex gap-2">
+                <div className="flex gap-2 items-center">
+                    <select
+                        value={selectedLocale}
+                        onChange={(e) => setSelectedLocale(e.target.value)}
+                        className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 rounded text-sm transition text-white border border-gray-600"
+                    >
+                        <option value="default">Default Prompts</option>
+                        {availableLocales
+                            .filter((locale) => locale !== "default")
+                            .map((locale) => (
+                                <option key={locale} value={locale}>
+                                    {locale === currentLanguage ? `Translations (${locale}, current)` : `Translations (${locale})`}
+                                </option>
+                            ))}
+                    </select>
                     <button onClick={() => setIsLibraryOpen(true)} className="flex items-center gap-2 px-3 py-1.5 bg-gray-700 hover:bg-gray-600 rounded text-sm transition">
                         <span className="text-yellow-400">★</span> Library
                     </button>
@@ -132,6 +187,12 @@ export default function PromptEditor({ jsonContent, onChange, globalPrompts, can
                     </button>
                 </div>
             </div>
+
+            {selectedLocale !== "default" && (
+                <div className="mb-4 rounded border border-emerald-800 bg-emerald-950/30 px-3 py-2 text-xs text-emerald-200">
+                    Editing translated prompts for <strong>{selectedLocale}</strong>. Any missing keys will fall back to the default prompt text.
+                </div>
+            )}
 
             {/* Tabs */}
             <div className="flex gap-2 mb-6 flex-wrap border-b border-gray-700 pb-2">
