@@ -7,6 +7,8 @@
     "general"
   ],
   "prompts": {
+    "first_response_greeting": "Hi, I'm {assistant} with {brand}. Before we get into the details, can I take your name?",
+    "first_response_ask_intent": "How can I help you today, {name}?",
     "system_greeting": "Hi, I'm {assistant} with {brand}. Before we get into the details, can I take your name?",
     "ask_intent_with_name": "How can I help you today, {name}?",
     "ask_intent_retry_giveup": "How can I help you today?",
