@@ -110,6 +110,7 @@ class TwilioBridge:
         self._is_active = False
         self._emit_sim_events = False
         self._recognition_started = False
+        self._received_media_frames = 0
 
     def _start_recognition(self):
         if self._recognition_started:
@@ -362,6 +363,8 @@ class TwilioBridge:
                         if config.get("workflows", {}).get(workflow_key):
                             session["intent"] = workflow_key
                             session["current_node_id"] = None
+                            session.pop("customer_name", None)
+                            session.pop("_name_retry", None)
                             logger.info(f"Test workflow override active: intent={workflow_key}")
                         else:
                             logger.warning(
@@ -459,6 +462,9 @@ class TwilioBridge:
                     # Convert MULAW -> PCM
                     pcm_chunk = audioop.ulaw2lin(chunk, 2)
                     self.push_stream.write(pcm_chunk)
+                    self._received_media_frames += 1
+                    if self._received_media_frames == 1:
+                        logger.info("Received first caller audio frame: %d bytes", len(chunk))
 
                     # Twilio sends media frames continuously, including silence.
                     # Only sustained caller energy is allowed to interrupt playback.

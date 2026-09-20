@@ -179,6 +179,9 @@ export default function Home() {
   const simGainNodeRef = useRef<GainNode | null>(null);
   const simNextPlaybackTimeRef = useRef<number>(0);
   const simReceivedAudioRef = useRef<number>(0);
+  const simSentAudioRef = useRef<number>(0);
+  const simMicActiveLoggedRef = useRef(false);
+  const simMicWarningTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (status === "authenticated") {
@@ -1140,6 +1143,10 @@ export default function Home() {
     simAudioContextRef.current = null;
     simNextPlaybackTimeRef.current = 0;
     simReceivedAudioRef.current = 0;
+    simSentAudioRef.current = 0;
+    simMicActiveLoggedRef.current = false;
+    if (simMicWarningTimeoutRef.current) clearTimeout(simMicWarningTimeoutRef.current);
+    simMicWarningTimeoutRef.current = null;
     setIsSimulatingCall(false);
     if (!silent) addSimLog("Simulation stopped");
   };
@@ -1162,8 +1169,17 @@ export default function Home() {
       setSimCallLogs([]);
       setIsSimulatingCall(true);
       addSimLog("Requesting microphone access...");
-      const mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaStream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          channelCount: 1,
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      });
       simMediaStreamRef.current = mediaStream;
+      const microphoneTrack = mediaStream.getAudioTracks()[0];
+      addSimLog(`Microphone: ${microphoneTrack?.label || "default input"}`);
 
       const audioContext = new AudioContext({ sampleRate: 48000 });
       simAudioContextRef.current = audioContext;
@@ -1298,9 +1314,13 @@ export default function Home() {
         const input = event.inputBuffer.getChannelData(0);
         const downsampled = downsampleTo8k(input, audioContext.sampleRate);
         const ulaw = new Uint8Array(downsampled.length);
+        let sumSquares = 0;
         for (let i = 0; i < downsampled.length; i += 1) {
-          ulaw[i] = pcm16ToUlaw(downsampled[i]);
+          const sample = Math.max(-1, Math.min(1, downsampled[i] * 2.5));
+          sumSquares += sample * sample;
+          ulaw[i] = pcm16ToUlaw(sample);
         }
+        const rms = Math.sqrt(sumSquares / Math.max(1, downsampled.length));
         socket.send(
           JSON.stringify({
             event: "media",
@@ -1308,10 +1328,23 @@ export default function Home() {
             media: { payload: base64FromBytes(ulaw) }
           })
         );
+        simSentAudioRef.current += 1;
+        if (simSentAudioRef.current === 1) addSimLog("Microphone stream connected");
+        if (!simMicActiveLoggedRef.current && rms >= 0.012) {
+          simMicActiveLoggedRef.current = true;
+          if (simMicWarningTimeoutRef.current) clearTimeout(simMicWarningTimeoutRef.current);
+          simMicWarningTimeoutRef.current = null;
+          addSimLog("Microphone audio detected");
+        }
       };
 
       sourceNode.connect(processorNode);
       processorNode.connect(audioContext.destination);
+      simMicWarningTimeoutRef.current = setTimeout(() => {
+        if (!simMicActiveLoggedRef.current) {
+          addSimLog("No microphone audio detected. Check the selected input device and browser microphone level.");
+        }
+      }, 5000);
       addSimLog("Streaming microphone audio to agent");
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Failed to start simulation";
