@@ -1,0 +1,28 @@
+{
+  "intents": [
+    {
+      "name": "first_response",
+      "label": "First Response"
+    },
+    {
+      "name": "sales",
+      "label": "Sales"
+    },
+    {
+      "name": "service",
+      "label": "Service"
+    },
+    {
+      "name": "warranty",
+      "label": "Warranty"
+    },
+    {
+      "name": "finance",
+      "label": "Finance"
+    },
+    {
+      "name": "booking",
+      "label": "Booking"
+    }
+  ]
+}

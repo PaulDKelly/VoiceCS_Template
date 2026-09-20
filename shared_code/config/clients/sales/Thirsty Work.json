@@ -1,0 +1,169 @@
+{
+  "industry": "sales",
+  "default_tone": "enthusiastic and helpful",
+  "default_brand_name": "Your Company",
+  "intents": [
+    "sales",
+    "general"
+  ],
+  "prompts": {
+    "system_greeting": "Hi, I'm {assistant} with {brand}. Before we get into the details, can I take your name?",
+    "ask_intent_with_name": "How can I help you today, {name}?",
+    "ask_intent_retry_giveup": "How can I help you today?",
+    "ask_name_retry": "Sorry, I didn't catch your name. Could you say it again?",
+    "intent_fallback": "Sorry, I didn't quite catch that. How can I help you today?",
+    "sales_start": "Great! I'd be happy to help you with that. What are you interested in?",
+    "sales_ask_product": "What product or service are you interested in?",
+    "sales_ask_quantity": "How many would you like to order?",
+    "sales_ask_contact": "Perfect! I'd like to have one of our team reach out to you. What's the best phone number to contact you?",
+    "sales_confirm": "Thanks {name}! I've captured all your details. One of our team will be in touch shortly. Is there anything else I can help with today?",
+    "sales_ask_product_only": "What product  are you interested in?"
+  },
+  "workflows": {
+    "sales": {
+      "nodes": [
+        {
+          "id": "s1",
+          "type": "default",
+          "data": {
+            "label": "Sales Start",
+            "promptKey": "sales_start"
+          },
+          "position": {
+            "x": 250,
+            "y": 0
+          },
+          "width": 150,
+          "height": 39,
+          "selected": false,
+          "dragging": false
+        },
+        {
+          "id": "s2",
+          "type": "default",
+          "data": {
+            "label": "Ask Product",
+            "promptKey": "sales_ask_product_only",
+            "captureVariable": "product_type"
+          },
+          "position": {
+            "x": 250,
+            "y": 100
+          },
+          "width": 150,
+          "height": 39,
+          "selected": false,
+          "dragging": false
+        },
+        {
+          "id": "s3",
+          "type": "default",
+          "data": {
+            "label": "Ask Quantity",
+            "promptKey": "sales_ask_quantity",
+            "captureVariable": "quantity_productt"
+          },
+          "position": {
+            "x": 250,
+            "y": 200
+          },
+          "width": 150,
+          "height": 39,
+          "selected": false,
+          "dragging": false
+        },
+        {
+          "id": "s4",
+          "type": "default",
+          "data": {
+            "label": "Ask Contact Number",
+            "promptKey": "sales_ask_contact",
+            "captureVariable": "contact_number"
+          },
+          "position": {
+            "x": 250,
+            "y": 300
+          },
+          "width": 150,
+          "height": 39,
+          "selected": false,
+          "dragging": false
+        },
+        {
+          "id": "s5",
+          "type": "action",
+          "data": {
+            "label": "Send Order Email",
+            "actionType": "email",
+            "actionConfig": {
+              "to": "pauldkelly@outlook.com",
+              "subject": "New Order: {customer_name}"
+            },
+            "captureVariable": "",
+            "promptKey": "sales_confirm"
+          },
+          "position": {
+            "x": 250,
+            "y": 400
+          },
+          "width": 190,
+          "height": 67,
+          "selected": false,
+          "dragging": false
+        },
+        {
+          "id": "s6",
+          "type": "default",
+          "data": {
+            "label": "Confirm",
+            "promptKey": "sales_confirm"
+          },
+          "position": {
+            "x": 250,
+            "y": 500
+          },
+          "width": 150,
+          "height": 39,
+          "selected": true,
+          "dragging": false
+        }
+      ],
+      "edges": [
+        {
+          "id": "es1-2",
+          "source": "s1",
+          "target": "s2"
+        },
+        {
+          "id": "es2-3",
+          "source": "s2",
+          "target": "s3"
+        },
+        {
+          "id": "es3-4",
+          "source": "s3",
+          "target": "s4"
+        },
+        {
+          "id": "es4-5",
+          "source": "s4",
+          "target": "s5"
+        },
+        {
+          "id": "es5-6",
+          "source": "s5",
+          "target": "s6"
+        }
+      ]
+    }
+  },
+  "client_id": "Thirsty Work",
+  "brand_name": "Thirsty Work",
+  "agent_name": "Tara",
+  "assistant_name": "Tara",
+  "language": "en-GB",
+  "voice_name": "",
+  "elevenlabs_voice_id": "MzqUf1HbJ8UmQ0wUsx2p",
+  "enable_sales": true,
+  "tone": "friendly, concise, helpful"
+}

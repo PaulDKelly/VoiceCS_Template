@@ -1,0 +1,16 @@
+{
+  "industry": "Sales",
+  "intents": [
+    "general"
+  ],
+  "enable_warranty": false,
+  "enable_service": false,
+  "enable_sales": false,
+  "enable_finance": false,
+  "prompts": {
+    "general": "You are a helpful assistant for the Sales industry. Please be polite and concise.",
+    "fallback": "I didn't catch that. Could you repeat?",
+    "transfer": "I am transferring you to a human agent now."
+  },
+  "workflows": {}
+}

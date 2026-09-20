@@ -56,3 +56,27 @@ __azurite_db*__.json
 !action.yml
 !action.yaml
 deploy_bot.ps1
+
+# Runtime state and local credentials
+sessions/
+shared_code/config/users.json
+shared_code/config/users.json.tmp
+dashboard/config/users.json
+shared_code/config/audit_log.json
+dashboard/config/audit_log.json
+bot_credentials.txt
+accounts*.json
+acs_info.json
+subs.json
+app*.json
+revisions*.json
+deployments*.json
+*logs*.txt
+*_logs.txt
+
+# Frontend build output and local environment
+dashboard/.next/
+dashboard/node_modules/
+dashboard/.env*
+dashboard/next-env.d.ts
+dashboard/*.tsbuildinfo

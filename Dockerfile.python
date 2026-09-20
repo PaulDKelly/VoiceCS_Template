@@ -1,0 +1,33 @@
+FROM mcr.microsoft.com/mirror/docker/library/python:3.10-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+WORKDIR /app
+ENV CONFIG_DIR=/app/shared_code/config
+ENV CLIENT_ID=default
+ENV INDUSTRY=automotive
+
+# Install system dependencies required by Azure Speech SDK
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    libasound2 \
+    libssl3 \
+    libffi-dev \
+    libcurl4 \
+    libgomp1 \
+    libatomic1 \
+    && apt-get clean
+
+COPY requirements.txt .
+
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+
+EXPOSE 8080
+
+ENV PORT=8080
+
+CMD ["python", "bot_main.py"]
+

@@ -1,9 +1,6 @@
 import json
 import os
-try:
-    from azure.storage.blob import BlobServiceClient
-except Exception:
-    BlobServiceClient = None
+from azure.storage.blob import BlobServiceClient
 
 BASE_DIR = os.path.dirname(__file__)
 # Allow overriding the config source location (e.g. for mounted volumes)
@@ -20,8 +17,6 @@ def _get_container():
     global _blob_client, _container_client
     if not BLOB_CONNECTION:
         return None
-    if BlobServiceClient is None:
-        return None
     if _container_client is None:
         _blob_client = BlobServiceClient.from_connection_string(BLOB_CONNECTION)
         _container_client = _blob_client.get_container_client(BLOB_CONTAINER)
@@ -33,45 +28,24 @@ def load_json(path):
         return json.load(f)
 
 
-def _resolve_industry_dir(industry):
-    if not industry:
-        return None
-    base = os.path.join(CONFIG_DIR, "industries")
-    exact = os.path.join(base, industry)
-    if os.path.isdir(exact):
-        return industry
-    lower = industry.lower()
-    lower_path = os.path.join(base, lower)
-    if os.path.isdir(lower_path):
-        return lower
-    # Case-insensitive scan
-    if os.path.isdir(base):
-        for name in os.listdir(base):
-            if name.lower() == lower:
-                return name
-    return industry
-
-
 def load_industry_defaults(industry):
-    resolved = _resolve_industry_dir(industry)
-    path = os.path.join(CONFIG_DIR, "industries", resolved, "defaults.json")
+    path = os.path.join(CONFIG_DIR, "industries", industry, "defaults.json")
     return load_json(path)
 
 
 def load_client_config(industry, client_id):
-    resolved_industry = _resolve_industry_dir(industry)
     # 1. Try exact match
-    path = os.path.join(CONFIG_DIR, "clients", resolved_industry, f"{client_id}.json")
+    path = os.path.join(CONFIG_DIR, "clients", industry, f"{client_id}.json")
     if os.path.exists(path):
         return load_json(path)
 
     # 2. Try lowercase
-    lower_path = os.path.join(CONFIG_DIR, "clients", resolved_industry, f"{client_id.lower()}.json")
+    lower_path = os.path.join(CONFIG_DIR, "clients", industry, f"{client_id.lower()}.json")
     if os.path.exists(lower_path):
         return load_json(lower_path)
 
     # 3. Scan directory for case-insensitive match
-    client_dir = os.path.join(CONFIG_DIR, "clients", resolved_industry)
+    client_dir = os.path.join(CONFIG_DIR, "clients", industry)
     if os.path.exists(client_dir):
         for filename in os.listdir(client_dir):
             if filename.lower() == f"{client_id.lower()}.json":
@@ -128,21 +102,5 @@ def load_phone_mappings():
     path = os.path.join(CONFIG_DIR, "phone_mappings.json")
     if os.path.exists(path):
         data = load_json(path)
-        mappings = data.get("mappings", {})
-        # Normalize mapping keys to improve matching (strip spaces, dashes, parentheses)
-        try:
-            import re
-            normalized = {}
-            for key, value in mappings.items():
-                if not isinstance(key, str):
-                    normalized[key] = value
-                    continue
-                cleaned = re.sub(r"[\s\-()]", "", key)
-                normalized[cleaned] = value
-                # Also include exact key if different
-                if cleaned != key:
-                    normalized[key] = value
-            return normalized
-        except Exception:
-            return mappings
+        return data.get("mappings", {})
     return {}

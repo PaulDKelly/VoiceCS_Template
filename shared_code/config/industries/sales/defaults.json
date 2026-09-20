@@ -17,8 +17,7 @@
         "sales_ask_product": "What product or service are you interested in?",
         "sales_ask_quantity": "How many would you like to order?",
         "sales_ask_contact": "Perfect! I'd like to have one of our team reach out to you. What's the best phone number to contact you?",
-        "sales_confirm": "Thanks {name}! I've captured all your details. One of our team will be in touch shortly. Is there anything else I can help with today?",
-        "intent_not_recognized": "Sorry, I’m not able to help with that. Is there anything else I can assist you with?"
+        "sales_confirm": "Thanks {name}! I've captured all your details. One of our team will be in touch shortly. Is there anything else I can help with today?"
     },
     "workflows": {
         "first_response": {
@@ -28,12 +27,26 @@
                     "type": "input",
                     "data": {
                         "label": "Greeting & Name",
-                        "promptKey": "first_response_greeting",
-                        "captureVariable": "customer_name"
+                        "promptKey": "first_response_greeting"
                     },
                     "position": {
                         "x": 250,
                         "y": 0
+                    }
+                },
+                {
+                    "id": "fr2",
+                    "type": "action",
+                    "data": {
+                        "label": "Extract Name",
+                        "actionType": "extract_name",
+                        "actionConfig": {
+                            "target": "customer_name"
+                        }
+                    },
+                    "position": {
+                        "x": 250,
+                        "y": 100
                     }
                 },
                 {
@@ -45,7 +58,7 @@
                     },
                     "position": {
                         "x": 250,
-                        "y": 100
+                        "y": 200
                     }
                 },
                 {
@@ -57,14 +70,19 @@
                     },
                     "position": {
                         "x": 250,
-                        "y": 200
+                        "y": 300
                     }
                 }
             ],
             "edges": [
                 {
-                    "id": "efr1-3",
+                    "id": "efr1-2",
                     "source": "fr1",
+                    "target": "fr2"
+                },
+                {
+                    "id": "efr2-3",
+                    "source": "fr2",
                     "target": "fr3"
                 },
                 {

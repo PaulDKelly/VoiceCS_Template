@@ -1,0 +1,6 @@
+{
+    "global_greeting": "Hi, thanks for calling.",
+    "global_fallback": "I didn't quite catch that. Could you repeat?",
+    "global_goodbye": "Thanks for calling, goodbye!",
+    "global_hold_message": "Please hold while I check that for you."
+}

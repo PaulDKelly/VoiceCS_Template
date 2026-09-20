@@ -1,0 +1,28 @@
+{
+  "value": [
+    {
+      "@search.action": "upload",
+      "id": "doc-001",
+      "title": "PNJ Cleaning office hours",
+      "content": "PNJ Cleaning office hours are Monday to Friday 8:30am to 5:30pm UK time.",
+      "category": "hours",
+      "source": "kb-test-pack"
+    },
+    {
+      "@search.action": "upload",
+      "id": "doc-002",
+      "title": "PNJ Cleaning emergency line",
+      "content": "For emergency callouts, customers should call 0207 123 4567 and select option 2.",
+      "category": "contact",
+      "source": "kb-test-pack"
+    },
+    {
+      "@search.action": "upload",
+      "id": "doc-003",
+      "title": "PNJ Cleaning service postcode coverage",
+      "content": "PNJ Cleaning serves London postcodes SW1, SW3, W1, W2, E1 and N1.",
+      "category": "coverage",
+      "source": "kb-test-pack"
+    }
+  ]
+}

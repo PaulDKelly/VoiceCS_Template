@@ -2,9 +2,11 @@ import os
 import requests
 import json
 
-API_KEY = os.getenv("ELEVENLABS_API_KEY", "sk_8be92445cdda39fc35df381fd170fd6a934508ee305dc945")
+API_KEY = os.getenv("ELEVENLABS_API_KEY")
 
 def test_voice(voice_id, text="Hi, I am Nova with AutoNova. How can I help you today?"):
+    if not API_KEY:
+        raise RuntimeError("Set ELEVENLABS_API_KEY before running this test.")
     # Using the same settings as the bot (Multilingual v2)
     url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
     

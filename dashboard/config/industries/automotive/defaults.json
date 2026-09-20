@@ -1,0 +1,116 @@
+{
+  "industry": "automotive",
+  "default_tone": "friendly and professional",
+  "default_brand_name": "Your Automotive Brand",
+  "intents": [
+    "warranty",
+    "service",
+    "sales",
+    "finance",
+    "general"
+  ],
+  "start_of_call": {
+    "ask_name": true,
+    "ask_callback_number": true,
+    "ask_reason_for_call": true
+  },
+  "warranty_rules": {
+    "default_warranty_months": 36
+  },
+  "service_rules": {
+    "collect_registration": true,
+    "collect_mileage": true
+  },
+  "prompts": {
+    "system_greeting": "Hi, I’m {assistant} with {brand}. Before we get into the details, can I take your name?",
+    "ask_intent_with_name": "How can I help you today, {name}?",
+    "ask_intent_retry_giveup": "How can I help you today?",
+    "ask_name_retry": "Sorry, I didn't catch your name. Could you say it again?",
+    "intent_fallback": "Sorry, I didn’t quite catch that. How can I help you today?",
+    "warranty_valid_ask_issue": "Thanks. It looks like the vehicle is within the warranty period. Could you describe the issue you're experiencing?",
+    "warranty_ask_purchase_date": "Do you know roughly when the vehicle was purchased?",
+    "warranty_expired_redirect": "Thanks for that. It looks like the vehicle is outside the manufacturer warranty. You may want to contact an independent garage. Is there anything else?",
+    "warranty_expired_capture": "Thanks for that. Although the vehicle is outside warranty, I can still take some details. Could you describe the issue?"
+  },
+  "workflows": {
+    "warranty": {
+      "nodes": [
+        {
+          "id": "1",
+          "type": "input",
+          "data": {
+            "label": "Start Warranty Check"
+          },
+          "position": {
+            "x": 250,
+            "y": 0
+          }
+        },
+        {
+          "id": "2",
+          "data": {
+            "label": "Check Purchase Date"
+          },
+          "position": {
+            "x": 250,
+            "y": 100
+          }
+        },
+        {
+          "id": "3",
+          "data": {
+            "label": "Calculate Status"
+          },
+          "position": {
+            "x": 250,
+            "y": 200
+          }
+        },
+        {
+          "id": "4",
+          "data": {
+            "label": "In Warranty: Ask Issue"
+          },
+          "position": {
+            "x": 100,
+            "y": 300
+          }
+        },
+        {
+          "id": "5",
+          "data": {
+            "label": "Out of Warranty: Redirect"
+          },
+          "position": {
+            "x": 400,
+            "y": 300
+          }
+        }
+      ],
+      "edges": [
+        {
+          "id": "e1-2",
+          "source": "1",
+          "target": "2"
+        },
+        {
+          "id": "e2-3",
+          "source": "2",
+          "target": "3"
+        },
+        {
+          "id": "e3-4",
+          "source": "3",
+          "target": "4",
+          "label": "< 36 months"
+        },
+        {
+          "id": "e3-5",
+          "source": "3",
+          "target": "5",
+          "label": "> 36 months"
+        }
+      ]
+    }
+  }
+}

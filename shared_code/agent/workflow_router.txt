@@ -1,0 +1,22 @@
+from shared_code.workflows.warranty_engine import handle_warranty
+from shared_code.workflows.service_engine import handle_service
+from shared_code.workflows.finance_engine import handle_finance
+from shared_code.workflows.sales_engine import handle_sales
+from shared_code.workflows.general_engine import handle_general
+
+
+def route_to_workflow(intent: str, session_id: str, text: str) -> dict:
+    if intent == "warranty":
+        return handle_warranty(session_id, text)
+
+    if intent == "service":
+        return handle_service(session_id, text)
+
+    if intent == "finance":
+        return handle_finance(session_id, text)
+
+    if intent == "sales":
+        return handle_sales(session_id, text)
+
+    return handle_general(session_id, text)
+
