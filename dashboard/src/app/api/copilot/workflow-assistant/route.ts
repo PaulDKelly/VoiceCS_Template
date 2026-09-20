@@ -5,6 +5,157 @@ export const dynamic = "force-dynamic";
 
 type AnyRecord = Record<string, any>;
 
+type CopilotResult = {
+  kind: "question" | "diagnosis" | "workflow_draft" | "new_client_draft" | "guidance";
+  reply: string;
+  questions?: string[];
+  proposed_config?: AnyRecord | null;
+  client_draft?: AnyRecord | null;
+  change_summary?: string[];
+};
+
+function redactSecrets(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(redactSecrets);
+  if (!value || typeof value !== "object") return value;
+  const out: AnyRecord = {};
+  for (const [key, child] of Object.entries(value as AnyRecord)) {
+    if (/secret|token|password|api[_-]?key/i.test(key)) {
+      out[key] = child ? "[configured]" : "";
+    } else {
+      out[key] = redactSecrets(child);
+    }
+  }
+  return out;
+}
+
+function diagnoseConfig(config: AnyRecord) {
+  const issues: string[] = [];
+  const prompts = config?.prompts && typeof config.prompts === "object" ? config.prompts : {};
+  const workflows = config?.workflows && typeof config.workflows === "object" ? config.workflows : {};
+  if (!workflows.first_response) issues.push("Missing required first_response workflow.");
+  for (const [workflowKey, workflow] of Object.entries(workflows as Record<string, AnyRecord>)) {
+    const nodes = Array.isArray(workflow?.nodes) ? workflow.nodes : [];
+    const edges = Array.isArray(workflow?.edges) ? workflow.edges : [];
+    const ids = new Set<string>();
+    const incoming = new Set<string>();
+    for (const node of nodes) {
+      const id = String(node?.id || "").trim();
+      if (!id) issues.push(`${workflowKey}: node without an id.`);
+      else if (ids.has(id)) issues.push(`${workflowKey}: duplicate node id '${id}'.`);
+      else ids.add(id);
+      const promptKey = String(node?.data?.promptKey || "").trim();
+      if (promptKey && !String(prompts[promptKey] || "").trim()) {
+        issues.push(`${workflowKey}/${id}: missing prompt '${promptKey}'.`);
+      }
+      const actionType = String(node?.data?.actionType || "");
+      if (["database_query", "knowledge_search"].includes(actionType)) {
+        const cfg = node?.data?.actionConfig || {};
+        if (!String(cfg.error_prompt || "").trim()) issues.push(`${workflowKey}/${id}: ${actionType} has no error prompt.`);
+      }
+    }
+    for (const edge of edges) {
+      const source = String(edge?.source || "");
+      const target = String(edge?.target || "");
+      if (!ids.has(source) || !ids.has(target)) issues.push(`${workflowKey}: broken edge ${source} -> ${target}.`);
+      incoming.add(target);
+    }
+    for (const id of ids) {
+      if (id !== String(nodes[0]?.id || "") && !incoming.has(id)) issues.push(`${workflowKey}/${id}: unreachable node.`);
+    }
+  }
+  return issues;
+}
+
+function validWorkflowDraft(candidate: unknown, current: AnyRecord) {
+  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return null;
+  const next = candidate as AnyRecord;
+  if (!next.workflows || typeof next.workflows !== "object") return null;
+  if (!next.prompts || typeof next.prompts !== "object") return null;
+  if (!next.workflows.first_response) return null;
+  for (const workflow of Object.values(next.workflows as Record<string, AnyRecord>)) {
+    const nodes = Array.isArray(workflow?.nodes) ? workflow.nodes : [];
+    const edges = Array.isArray(workflow?.edges) ? workflow.edges : [];
+    if (!nodes.length) return null;
+    const ids = nodes.map((node: AnyRecord) => String(node?.id || "").trim());
+    if (ids.some((id: string) => !id) || new Set(ids).size !== ids.length) return null;
+    const idSet = new Set(ids);
+    const incoming = new Set(edges.map((edge: AnyRecord) => String(edge?.target || "")));
+    for (const node of nodes) {
+      const promptKey = String(node?.data?.promptKey || "").trim();
+      if (promptKey && !String(next.prompts[promptKey] || "").trim()) return null;
+    }
+    if (edges.some((edge: AnyRecord) => !idSet.has(String(edge?.source || "")) || !idSet.has(String(edge?.target || "")))) {
+      return null;
+    }
+    if (ids.slice(1).some((id: string) => !incoming.has(id))) return null;
+  }
+  next.client_id = current.client_id || next.client_id;
+  next.industry = current.industry || next.industry;
+  return next;
+}
+
+async function callAzureCopilot(args: {
+  message: string;
+  conversation: Array<{ role: string; text: string }>;
+  config: AnyRecord;
+  industry: string;
+  client: string;
+  selectedWorkflowKey: string | null;
+  diagnostics: string[];
+}): Promise<CopilotResult | null> {
+  const endpoint = String(process.env.AOAI_ENDPOINT || "").replace(/\/+$/, "");
+  const apiKey = String(process.env.AOAI_API_KEY || "");
+  const deployment = String(process.env.AOAI_DEPLOYMENT || "gpt-4o-mini");
+  if (!endpoint || !apiKey) return null;
+
+  const system = `You are the Workflow Manager Copilot for a deterministic voice customer-service platform.
+Return JSON only. Never include secrets. Never claim a change is live.
+Your result must have: kind, reply, questions, proposed_config, client_draft, change_summary.
+kind is one of question, diagnosis, workflow_draft, new_client_draft, guidance.
+Ask concise follow-up questions when business requirements are missing. Ask no more than 5 at once.
+For workflow_draft, return the COMPLETE updated client config in proposed_config. Preserve unrelated configuration exactly.
+Workflow shape: workflows.<intent>.nodes[] and edges[]. Nodes have id, type, data, position. Prompt/input nodes use data.promptKey and optional captureVariable. Action nodes use data.actionType/actionConfig. Every promptKey must exist in prompts. Every edge endpoint must exist. Add the intent to intents.
+For new_client_draft, client_draft may contain industry, client_name, brand_name, assistant_name, opening_hours, brand_phone, language, tone, tts_provider, voice id/name, intents and a short requirements summary. Ask questions first unless name, industry, purpose/intents, assistant identity and tone are known.
+For diagnosis, explain concrete faults and repairs using the supplied deterministic diagnostics.
+Do not modify phone routing, credentials, database credentials, authentication, or users.`;
+
+  const context = {
+    selected: { industry: args.industry, client: args.client, workflow: args.selectedWorkflowKey },
+    diagnostics: args.diagnostics,
+    config: redactSecrets(args.config),
+  };
+  const recent = args.conversation.slice(-10).map((item) => ({
+    role: item.role === "assistant" ? "assistant" : "user",
+    content: String(item.text || "").slice(0, 4000),
+  }));
+  const response = await fetch(
+    `${endpoint}/openai/deployments/${encodeURIComponent(deployment)}/chat/completions?api-version=2024-02-01`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "api-key": apiKey },
+      body: JSON.stringify({
+        messages: [
+          { role: "system", content: system },
+          ...recent,
+          { role: "user", content: `${args.message}\n\nCURRENT_CONTEXT:\n${JSON.stringify(context).slice(0, 60000)}` },
+        ],
+        temperature: 0.1,
+        response_format: { type: "json_object" },
+      }),
+      signal: AbortSignal.timeout(45000),
+    },
+  );
+  if (!response.ok) throw new Error(`Azure OpenAI request failed (${response.status}).`);
+  const body = await response.json();
+  const raw = String(body?.choices?.[0]?.message?.content || "");
+  const parsed = JSON.parse(raw) as CopilotResult;
+  if (parsed.kind === "workflow_draft") {
+    parsed.proposed_config = validWorkflowDraft(parsed.proposed_config, args.config);
+    if (!parsed.proposed_config) throw new Error("The generated workflow draft failed structural validation.");
+  }
+  return parsed;
+}
+
 function collectKnowledgeNodes(config: AnyRecord) {
   const workflows = config?.workflows && typeof config.workflows === "object" ? config.workflows : {};
   const out: Array<{ workflow: string; nodeId: string; actionConfig: AnyRecord }> = [];
@@ -242,12 +393,32 @@ export async function POST(req: NextRequest) {
   const kbAware = Boolean(context?.kbAware);
   const useContext = Boolean(context?.useContext);
   const selectedWorkflowKey = String(context?.selectedWorkflowKey || "") || null;
+  const industry = String(context?.industry || "");
+  const client = String(context?.client || "");
+  const conversation = Array.isArray(body?.conversation) ? body.conversation : [];
   const config = useContext && context?.configSnapshot && typeof context.configSnapshot === "object"
     ? (context.configSnapshot as AnyRecord)
     : {};
 
   if (!message) {
     return NextResponse.json({ error: "Message is required." }, { status: 400 });
+  }
+
+  const diagnostics = diagnoseConfig(config);
+  try {
+    const result = await callAzureCopilot({
+      message,
+      conversation,
+      config,
+      industry,
+      client,
+      selectedWorkflowKey,
+      diagnostics,
+    });
+    if (result) return NextResponse.json(result);
+  } catch (error) {
+    console.error("Workflow copilot model request failed", error);
+    return NextResponse.json({ error: error instanceof Error ? error.message : "Copilot request failed." }, { status: 502 });
   }
 
   const summary = buildReadinessSummary(config, kbAware);
@@ -261,6 +432,6 @@ export async function POST(req: NextRequest) {
     answer,
   ].join("\n");
 
-  return NextResponse.json({ reply });
+  return NextResponse.json({ kind: "guidance", reply, questions: [], proposed_config: null, client_draft: null, change_summary: [] });
 }
 

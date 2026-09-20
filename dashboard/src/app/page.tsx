@@ -635,6 +635,40 @@ export default function Home() {
     setModalOpen(true);
   };
 
+  const reviewCopilotClientDraft = (draft: Record<string, any>) => {
+    const industry = String(draft.industry || selectedIndustry || "").trim();
+    const intents = Array.isArray(draft.intents)
+      ? draft.intents.map(String).filter(Boolean).join(", ")
+      : String(draft.intents_csv || draft.intents || "");
+    setModalType("create_client");
+    setModalData({ industry });
+    setModalInput(String(draft.client_name || draft.client_id || "").trim());
+    setNewClientDraft({
+      industry,
+      brand_name: String(draft.brand_name || ""),
+      assistant_name: String(draft.assistant_name || ""),
+      agent_name: String(draft.agent_name || draft.assistant_name || ""),
+      opening_hours: String(draft.opening_hours || ""),
+      brand_phone: String(draft.brand_phone || ""),
+      language: String(draft.language || "en-GB"),
+      tone: String(draft.tone || ""),
+      tts_provider: ["elevenlabs", "azure_neural"].includes(String(draft.tts_provider))
+        ? draft.tts_provider
+        : "",
+      elevenlabs_voice_id: String(draft.elevenlabs_voice_id || ""),
+      azure_voice_name: String(draft.azure_voice_name || ""),
+      intents_csv: intents,
+      default_intent: String(draft.default_intent || "first_response"),
+    });
+    setCreateClientMode("industry_template");
+    setCreateClientTemplateSource("");
+    fetch("/api/config?type=voice_library", { cache: "no-store" })
+      .then((res) => res.ok ? res.json() : { voices: [] })
+      .then((json) => setCreateClientVoices(Array.isArray(json?.voices) ? json.voices : []))
+      .catch(() => setCreateClientVoices([]));
+    setModalOpen(true);
+  };
+
   const getVoiceLocale = (voice: NewClientVoiceEntry) => {
     if (voice.locale) return voice.locale;
     const match = String(voice.voice_name || "").match(/^([a-z]{2,3}-[A-Z]{2,4})-/);
@@ -1649,6 +1683,15 @@ export default function Home() {
               client={selectedClient}
               selectedWorkflowKey={selectedWorkflowKey}
               editorContent={editorContent}
+              onApplyDraft={(config, changeSummary) => {
+                setEditorContent(JSON.stringify(config, null, 2));
+                setMessage(
+                  changeSummary.length
+                    ? `Copilot draft applied (${changeSummary.length} proposed changes). Review and Save when ready.`
+                    : "Copilot draft applied. Review and Save when ready."
+                );
+              }}
+              onPrepareClient={reviewCopilotClientDraft}
             />
           </div>
         </div>

@@ -1,10 +1,19 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { FilePlus2, Send, WandSparkles } from "lucide-react";
+
+type CopilotProposal = {
+  kind: "workflow_draft" | "new_client_draft";
+  proposedConfig?: Record<string, any>;
+  clientDraft?: Record<string, any>;
+  changeSummary: string[];
+};
 
 type CopilotMessage = {
   role: "user" | "assistant";
   text: string;
+  proposal?: CopilotProposal;
 };
 
 type WorkflowCopilotProps = {
@@ -12,6 +21,8 @@ type WorkflowCopilotProps = {
   client: string | null;
   selectedWorkflowKey: string | null;
   editorContent: string;
+  onApplyDraft: (config: Record<string, any>, changeSummary: string[]) => void;
+  onPrepareClient: (draft: Record<string, any>) => void;
 };
 
 export default function WorkflowCopilot({
@@ -19,11 +30,13 @@ export default function WorkflowCopilot({
   client,
   selectedWorkflowKey,
   editorContent,
+  onApplyDraft,
+  onPrepareClient,
 }: WorkflowCopilotProps) {
   const [messages, setMessages] = useState<CopilotMessage[]>([
     {
       role: "assistant",
-      text: "I can help with workflow setup, database queries, and knowledge-base nodes. Ask me what to configure.",
+      text: "I can design and diagnose workflows, add prompt nodes, or guide you through creating a client. I will ask for any details I need and let you review every proposed change.",
     },
   ]);
   const [input, setInput] = useState("");
@@ -51,6 +64,7 @@ export default function WorkflowCopilot({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           message: question,
+          conversation: messages.slice(-10),
           context: {
             industry,
             client,
@@ -67,7 +81,18 @@ export default function WorkflowCopilot({
         setMessages((prev) => [...prev, { role: "assistant", text: `Error: ${err}` }]);
       } else {
         const reply = String(data?.reply || "No response generated.");
-        setMessages((prev) => [...prev, { role: "assistant", text: reply }]);
+        const questions = Array.isArray(data?.questions) ? data.questions.filter(Boolean) : [];
+        const text = questions.length && !questions.every((item: string) => reply.includes(item))
+          ? `${reply}\n\n${questions.map((item: string, index: number) => `${index + 1}. ${item}`).join("\n")}`
+          : reply;
+        const summary = Array.isArray(data?.change_summary) ? data.change_summary.map(String) : [];
+        let proposal: CopilotProposal | undefined;
+        if (data?.kind === "workflow_draft" && data?.proposed_config) {
+          proposal = { kind: "workflow_draft", proposedConfig: data.proposed_config, changeSummary: summary };
+        } else if (data?.kind === "new_client_draft" && data?.client_draft) {
+          proposal = { kind: "new_client_draft", clientDraft: data.client_draft, changeSummary: summary };
+        }
+        setMessages((prev) => [...prev, { role: "assistant", text, proposal }]);
       }
     } catch (e) {
       setMessages((prev) => [...prev, { role: "assistant", text: "Error: assistant request failed." }]);
@@ -108,11 +133,42 @@ export default function WorkflowCopilot({
         {messages.map((m, idx) => (
           <div
             key={`copilot-msg-${idx}`}
-            className={`text-xs rounded px-2 py-1 whitespace-pre-wrap ${
+            className={`text-xs rounded px-2 py-2 whitespace-pre-wrap ${
               m.role === "assistant" ? "bg-gray-800 text-gray-200" : "bg-blue-900/40 text-blue-200"
             }`}
           >
             {m.text}
+            {m.proposal && (
+              <div className="mt-2 pt-2 border-t border-gray-700">
+                {m.proposal.changeSummary.length > 0 && (
+                  <ul className="mb-2 space-y-1 text-[11px] text-gray-400">
+                    {m.proposal.changeSummary.map((item, summaryIndex) => (
+                      <li key={`summary-${summaryIndex}`}>• {item}</li>
+                    ))}
+                  </ul>
+                )}
+                {m.proposal.kind === "workflow_draft" && m.proposal.proposedConfig && (
+                  <button
+                    type="button"
+                    onClick={() => onApplyDraft(m.proposal!.proposedConfig!, m.proposal!.changeSummary)}
+                    className="inline-flex items-center gap-1.5 px-2 py-1 rounded bg-blue-600 hover:bg-blue-500 text-white"
+                    title="Apply this proposal to the unsaved editor draft"
+                  >
+                    <WandSparkles size={13} /> Apply to draft
+                  </button>
+                )}
+                {m.proposal.kind === "new_client_draft" && m.proposal.clientDraft && (
+                  <button
+                    type="button"
+                    onClick={() => onPrepareClient(m.proposal!.clientDraft!)}
+                    className="inline-flex items-center gap-1.5 px-2 py-1 rounded bg-blue-600 hover:bg-blue-500 text-white"
+                    title="Review this proposal in the new client form"
+                  >
+                    <FilePlus2 size={13} /> Review new client
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         ))}
       </div>
@@ -121,14 +177,20 @@ export default function WorkflowCopilot({
           value={input}
           onChange={(e) => setInput(e.target.value)}
           className="w-full h-16 bg-gray-800 border border-gray-600 rounded p-2 text-xs text-white resize-none"
-          placeholder="Ask how to configure a node, DB query, or KB lookup..."
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && !event.shiftKey) {
+              event.preventDefault();
+              void sendMessage();
+            }
+          }}
+          placeholder="Describe a workflow, request a node, diagnose an issue, or create a client..."
         />
         <button
           onClick={sendMessage}
           disabled={loading || !input.trim()}
-          className="mt-2 w-full px-3 py-1.5 rounded text-xs font-medium bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-400"
+          className="mt-2 w-full px-3 py-1.5 rounded text-xs font-medium bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-400 flex items-center justify-center gap-1.5"
         >
-          {loading ? "Thinking..." : "Ask Assistant"}
+          <Send size={13} /> {loading ? "Thinking..." : "Ask Assistant"}
         </button>
       </div>
     </div>
