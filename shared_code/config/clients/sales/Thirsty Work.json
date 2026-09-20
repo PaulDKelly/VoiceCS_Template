@@ -22,6 +22,59 @@
     "sales_ask_product_only": "What product  are you interested in?"
   },
   "workflows": {
+    "first_response": {
+      "nodes": [
+        {
+          "id": "fr1",
+          "type": "input",
+          "data": {
+            "label": "Greeting & Name",
+            "promptKey": "first_response_greeting",
+            "captureVariable": "customer_name"
+          },
+          "position": {
+            "x": 250,
+            "y": 0
+          }
+        },
+        {
+          "id": "fr3",
+          "type": "default",
+          "data": {
+            "label": "Ask Intent",
+            "promptKey": "first_response_ask_intent"
+          },
+          "position": {
+            "x": 250,
+            "y": 100
+          }
+        },
+        {
+          "id": "fr4",
+          "type": "action",
+          "data": {
+            "label": "Detect Intent",
+            "actionType": "detect_intent"
+          },
+          "position": {
+            "x": 250,
+            "y": 200
+          }
+        }
+      ],
+      "edges": [
+        {
+          "id": "efr1-3",
+          "source": "fr1",
+          "target": "fr3"
+        },
+        {
+          "id": "efr3-4",
+          "source": "fr3",
+          "target": "fr4"
+        }
+      ]
+    },
     "sales": {
       "nodes": [
         {
