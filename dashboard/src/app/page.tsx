@@ -1183,9 +1183,18 @@ export default function Home() {
             previous_intent?: string;
             current_node_id?: string;
             test_workflow?: string;
+            text?: string;
+            confidence?: number;
           };
           if (data.event === "sim_state") {
-            if (data.kind === "workflow_handoff") {
+            if (data.kind === "speech_detected") {
+              addSimLog("Caller speech detected");
+            } else if (data.kind === "transcript") {
+              const confidence = typeof data.confidence === "number"
+                ? ` (${Math.round(data.confidence * 100)}% confidence)`
+                : "";
+              addSimLog(`Heard: ${data.text || "-"}${confidence}`);
+            } else if (data.kind === "workflow_handoff") {
               addSimLog(
                 `Handoff: ${data.previous_intent || "unknown"} -> ${data.intent || "unknown"}`
               );

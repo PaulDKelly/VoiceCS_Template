@@ -134,7 +134,7 @@ class TwilioBridge:
             if self.noise_mode:
                 self.speech_config.set_property(
                     speechsdk.PropertyId.SpeechServiceConnection_InitialSilenceTimeoutMs,
-                    os.getenv("AZURE_STT_INITIAL_SILENCE_MS", "5000"),
+                    os.getenv("AZURE_STT_INITIAL_SILENCE_MS", "15000"),
                 )
                 self.speech_config.set_property(
                     speechsdk.PropertyId.SpeechServiceConnection_EndSilenceTimeoutMs,
@@ -463,6 +463,8 @@ class TwilioBridge:
                     # Twilio sends media frames continuously, including silence.
                     # Only sustained caller energy is allowed to interrupt playback.
                     caller_started_speaking = self._activity_detector.observe(pcm_chunk)
+                    if caller_started_speaking:
+                        await self._send_sim_event("speech_detected")
                     if (
                         caller_started_speaking
                         and self._speaking
@@ -523,6 +525,11 @@ class TwilioBridge:
                     logger.info(f"User said: {text} (confidence={confidence:.2f})")
                 else:
                     logger.info(f"User said: {text}")
+                if self._emit_sim_events and hasattr(self, "loop"):
+                    asyncio.run_coroutine_threadsafe(
+                        self._send_sim_event("transcript", text=text, confidence=confidence),
+                        self.loop,
+                    )
                 self._last_user_speech_at = time.monotonic()
                 self._no_response_reprompts = 0
                 self._cancel_no_response_task()
@@ -753,10 +760,7 @@ class TwilioBridge:
             logger.info(f"Agent reply: {reply_text}")
             # 2. Convert to Speech
             await self._speak_prompt(reply_text)
-            # Don't auto-reprompt immediately after the opening greeting;
-            # it can interrupt callers before they start speaking.
-            if text != "__start__":
-                self._schedule_no_response_reprompt()
+            self._schedule_no_response_reprompt()
             
         if should_hangup:
             logger.info("Closing socket due to HANGUP signal.")
@@ -1014,6 +1018,14 @@ class TwilioBridge:
                 # Catch "Unexpected ASGI message" or "Connection closed"
                 logger.warning(f"Failed to send media to Twilio (Connection likely closed): {e}")
                 pass
+
+    async def _send_sim_event(self, kind: str, **payload):
+        if not self._emit_sim_events or not self.websocket:
+            return
+        try:
+            await self.websocket.send_text(json.dumps({"event": "sim_state", "kind": kind, **payload}))
+        except Exception:
+            pass
 
     async def _wait_for_playback_complete(self):
         # Browser simulation does not implement Twilio mark acknowledgements.
