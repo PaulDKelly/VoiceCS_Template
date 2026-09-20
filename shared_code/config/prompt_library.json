@@ -30,6 +30,12 @@
             "text": "How can I help you today, {name}?"
         },
         {
+            "name": "Welcome Back (Name Known)",
+            "category": "Standard Interaction",
+            "suggested_key": "ask_intent_with_name_known",
+            "text": "Welcome back, {name}. How can I help you today?"
+        },
+        {
             "name": "Ask Intent (fallback)",
             "category": "Standard Interaction",
             "suggested_key": "ask_intent_retry_giveup",

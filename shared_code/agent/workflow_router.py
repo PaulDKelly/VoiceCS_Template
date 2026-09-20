@@ -12,9 +12,13 @@ def route_to_workflow(intent: str, session_id: str, text: str) -> dict:
     try:
         session = load_session(session_id)
         config = load_merged_config(session.get("client_id"), session.get("industry"))
-        if config.get("workflows", {}).get(intent):
-            print(f"DEBUG: Found custom workflow for intent '{intent}'. Routing to generic_engine.", flush=True)
-            return handle_generic_workflow(session_id, text)
+        custom_workflow = config.get("workflows", {}).get(intent)
+        if custom_workflow:
+            # Dashboard-created workflows are expected to run automatically.
+            # Keep an explicit opt-out switch for legacy clients that need hardcoded engines.
+            if custom_workflow.get("use_generic_engine") is not False:
+                print(f"DEBUG: Found custom workflow for intent '{intent}'. Routing to generic_engine.", flush=True)
+                return handle_generic_workflow(session_id, text)
     except Exception as e:
         print(f"DEBUG: Error checking for custom workflow: {e}", flush=True)
 

@@ -38,6 +38,37 @@ except Exception:
 
 print("RUNNING BOT FRAMEWORK VERSION: VOICE-AGENT-BOT")
 
+
+def resolve_routing(called_number, mappings, client_id, industry):
+    mapping_found = False
+    candidate_used = None
+
+    normalized_called = called_number
+    try:
+        import re
+        normalized_called = re.sub(r"[\s\-()]", "", called_number or "")
+    except Exception:
+        normalized_called = called_number
+
+    candidates = [
+        normalized_called,
+        "+" + normalized_called.lstrip("+"),
+        normalized_called.lstrip("+"),
+        called_number,
+        "+" + called_number.lstrip("+"),
+        called_number.lstrip("+"),
+    ]
+
+    for candidate in candidates:
+        if candidate in mappings:
+            client_id = mappings[candidate].get("client_id", client_id)
+            industry = mappings[candidate].get("industry", industry)
+            mapping_found = True
+            candidate_used = candidate
+            break
+
+    return client_id, industry, mapping_found, candidate_used, candidates
+
 # ---------------------------------------------------------
 # ENV VARS
 # ---------------------------------------------------------
@@ -50,14 +81,14 @@ if not MICROSOFT_APP_ID or not MICROSOFT_APP_PASSWORD:
     MICROSOFT_APP_ID = MICROSOFT_APP_ID or ""
     MICROSOFT_APP_PASSWORD = MICROSOFT_APP_PASSWORD or ""
 
-# Verify required agent config is present
+# Verify required agent config is present (allow phone-mapping-only routing)
 CLIENT_ID = os.getenv("CLIENT_ID")
 INDUSTRY = os.getenv("INDUSTRY")
 
 if not CLIENT_ID or not INDUSTRY:
-    raise RuntimeError("CLIENT_ID and INDUSTRY must be set")
-
-logger.info(f"Bot configured for CLIENT_ID={CLIENT_ID}, INDUSTRY={INDUSTRY}")
+    logger.warning("CLIENT_ID and/or INDUSTRY not set - relying on phone mappings for routing")
+else:
+    logger.info(f"Bot configured for CLIENT_ID={CLIENT_ID}, INDUSTRY={INDUSTRY}")
 
 # ---------------------------------------------------------
 # ACS & VOICE BRIDGE SETUP
@@ -142,52 +173,103 @@ async def twilio_voice_handler(req: Request) -> Response:
     logger.info(f"Generated Twilio WebSocket URL: {ws_url}")
     logger.info(f"Caller ID: {caller_number}, Called Number: {called_number}")
 
+    # Optional test-call overrides from query string
+    query_client_id = (req.query.get("client_id") or "").strip()
+    query_industry = (req.query.get("industry") or "").strip()
+    query_test_workflow = (req.query.get("test_workflow") or "").strip()
+    query_test_mode = (req.query.get("test_mode") or "").strip()
+
     # Phone Number Routing Logic
     client_id = os.getenv("CLIENT_ID")
     industry = os.getenv("INDUSTRY")
     mapping_found = False
-    
+    candidate_used = None
+
     try:
         from shared_code.utils.config_loader import load_phone_mappings
         mappings = load_phone_mappings()
         
-        # Robust matching: Try exact, then with/without +
-        candidates = [called_number, "+" + called_number.lstrip("+"), called_number.lstrip("+")]
-        
-        for candidate in candidates:
-            if candidate in mappings:
-                client_id = mappings[candidate].get("client_id", client_id)
-                industry = mappings[candidate].get("industry", industry)
-                mapping_found = True
-                logger.info(f"Routing match found for candidate '{candidate}'! -> Client: {client_id}")
-                break
+        client_id, industry, mapping_found, candidate_used, candidates = resolve_routing(
+            called_number,
+            mappings,
+            client_id,
+            industry,
+        )
+
+        if mapping_found:
+            logger.info(f"Routing match found for candidate '{candidate_used}'! -> Client: {client_id}")
+
+        if not mapping_found:
+            keys = list(mappings.keys())
+            sample = keys[:10]
+            logger.warning(
+                "No routing match for called number '%s'. Candidates tried: %s. Available mappings: %s (total=%d)",
+                called_number,
+                candidates,
+                sample,
+                len(keys),
+            )
     except Exception as e:
         logger.error(f"Failed to load phone mappings: {e}")
 
-    # If no mapping found and no defaults in env vars, return generic message
-    if not mapping_found and not client_id:
-        logger.warning(f"Unrecognized number {called_number} and no default CLIENT_ID set. Rejecting.")
+    # Explicit test-call override bypasses number mapping constraints.
+    if query_client_id and query_industry:
+        client_id = query_client_id
+        industry = query_industry
+        mapping_found = True
+        candidate_used = "__test_override__"
+        logger.info(
+            "Using test override routing -> client_id=%s, industry=%s, workflow=%s, test_mode=%s",
+            client_id,
+            industry,
+            query_test_workflow or "(none)",
+            query_test_mode or "(none)",
+        )
+
+    # If no mapping found, reject unless explicitly allowed
+    allow_unmapped = str(os.getenv("ALLOW_UNMAPPED_CALLS", "")).lower() in ("1", "true", "yes")
+    if not mapping_found and not allow_unmapped:
+        logger.warning(f"Unrecognized number {called_number}. Rejecting (no mapping).")
         response = VoiceResponse()
-        response.say("I'm sorry, this phone number is not recognized by our system. Please contact support for assistance. Goodbye.", voice="Polly.Amy")
+        response.say("I'm sorry, this phone number is not currently routed. Please contact support for assistance. Goodbye.", voice="Polly.Amy")
         response.hangup()
         return Response(text=str(response), content_type='application/xml')
 
     # Pass configuration via Query Parameters so WebSocket can access them immediately
     import urllib.parse
-    params = urllib.parse.urlencode({
+    params_obj = {
         "client_id": client_id,
         "industry": industry
-    })
+    }
+    if query_test_workflow:
+        params_obj["test_workflow"] = query_test_workflow
+    if query_test_mode:
+        params_obj["test_mode"] = query_test_mode
+    params = urllib.parse.urlencode(params_obj)
     ws_url_with_params = f"{ws_url}?{params}"
     
     response = VoiceResponse()
     connect = Connect()
     stream = Stream(url=ws_url_with_params)
     stream.parameter(name="phone_number", value=caller_number)
+    stream.parameter(name="called_number", value=called_number)
     stream.parameter(name="client_id", value=client_id)
     stream.parameter(name="industry", value=industry)
+    if query_test_workflow:
+        stream.parameter(name="test_workflow", value=query_test_workflow)
+    if query_test_mode:
+        stream.parameter(name="test_mode", value=query_test_mode)
     connect.append(stream)
     response.append(connect)
+
+    logger.info(
+        "TwiML routing resolved -> client_id=%s, industry=%s, called=%s, caller=%s, candidate_used=%s",
+        client_id,
+        industry,
+        called_number,
+        caller_number,
+        candidate_used,
+    )
     
     return Response(text=str(response), content_type='application/xml')
 
@@ -547,6 +629,46 @@ async def health(req: Request) -> Response:
     })
 
 
+async def health_route(req: Request) -> Response:
+    """
+    Diagnostic route to test phone routing logic.
+    Query param: called_number
+    """
+    called_number = req.query.get("called_number", "")
+    if not called_number:
+        return web.json_response({
+            "status": "error",
+            "error": "called_number is required"
+        }, status=400)
+    client_id = os.getenv("CLIENT_ID")
+    industry = os.getenv("INDUSTRY")
+
+    try:
+        from shared_code.utils.config_loader import load_phone_mappings
+        mappings = load_phone_mappings()
+        client_id, industry, mapping_found, candidate_used, candidates = resolve_routing(
+            called_number,
+            mappings,
+            client_id,
+            industry,
+        )
+    except Exception as e:
+        return web.json_response({
+            "status": "error",
+            "error": str(e),
+        }, status=500)
+
+    return web.json_response({
+        "status": "ok",
+        "called_number": called_number,
+        "resolved_client_id": client_id,
+        "resolved_industry": industry,
+        "mapping_found": mapping_found,
+        "candidate_used": candidate_used,
+        "candidates": candidates,
+    })
+
+
 # ---------------------------------------------------------
 # APPLICATION SETUP
 # ---------------------------------------------------------
@@ -555,8 +677,10 @@ app = web.Application()
 # Register routes
 app.router.add_post("/api/messages", messages)
 app.router.add_get("/health", health)
+app.router.add_get("/health/route", health_route)
 
 app.router.add_post("/tw-voice", twilio_voice_handler)
+app.router.add_post("/api/incoming-call", twilio_voice_handler)
 app.router.add_get("/api/audio-twilio", twilio_audio_handler)
 
 # ACS Call Automation Routes (DEPRECATED but kept for stability)

@@ -4,7 +4,7 @@ from shared_code.llm.aoai_client import chat_completion
 from shared_code.utils.config_loader import load_merged_config
 
 
-def detect_intent(text: str, client_id: str, industry: str) -> str:
+def detect_intent(text: str, client_id: str, industry: str, allow_llm: bool = True):
     """
     Dynamic, config-driven intent detection.
 
@@ -17,7 +17,7 @@ def detect_intent(text: str, client_id: str, industry: str) -> str:
 
     intents: List[str] = config.get("intents", ["general"])
     rules: Dict = config.get("intent_routing_rules", {})
-    text_lower = text.lower()
+    text_lower = (text or "").lower()
 
     priority_order: List[str] = rules.get("priority", intents)
     fallback_to_llm: bool = rules.get("fallback_to_llm", True)
@@ -46,12 +46,12 @@ def detect_intent(text: str, client_id: str, industry: str) -> str:
         if keyword_hits.get(intent):
             return intent
 
-    # 3. Fallback to LLM if enabled
-    if fallback_to_llm:
+    # 3. Fallback to LLM if enabled and allowed
+    if allow_llm and fallback_to_llm:
         return llm_detect_intent(text, intents, config)
 
-    # 4. Default to general if nothing matches
-    return "general"
+    # 4. No match
+    return None
 
 
 def llm_detect_intent(text: str, intents: List[str], config: Dict) -> str:

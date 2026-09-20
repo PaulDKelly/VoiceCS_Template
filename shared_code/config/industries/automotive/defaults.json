@@ -2,6 +2,33 @@
   "industry": "automotive",
   "default_tone": "friendly and professional",
   "default_brand_name": "Your Automotive Brand",
+  "stt_language": "en-GB",
+  "stt_noise_mode": true,
+  "stt_min_confidence": 0.42,
+  "stt_echo_guard_ms": 350,
+  "stt_phrase_weight": 1.35,
+  "stt_phrase_hints": [
+    "registration number",
+    "vehicle registration",
+    "number plate",
+    "VIN",
+    "MOT",
+    "BMW",
+    "service booking",
+    "warranty claim",
+    "test drive",
+    "part exchange",
+    "PCP",
+    "hire purchase"
+  ],
+  "barge_in_threshold_ms": 550,
+  "barge_in_min_speech_ms": 240,
+  "barge_in_rms_threshold": 500,
+  "barge_in_release_ms": 180,
+  "elevenlabs_model_id": "eleven_turbo_v2_5",
+  "elevenlabs_stability": 0.45,
+  "elevenlabs_similarity_boost": 0.8,
+  "elevenlabs_style": 0.15,
   "intents": [
     "first_response",
     "warranty",
@@ -49,6 +76,7 @@
     "warranty_ask_purchase_date": "Do you know roughly when the vehicle was purchased?",
     "warranty_expired_redirect": "Thanks for that. It looks like the vehicle is outside the manufacturer warranty. You may want to contact an independent garage. Is there anything else?",
     "warranty_expired_capture": "Thanks for that. Although the vehicle is outside warranty, I can still take some details. Could you describe the issue?",
+    "intent_not_recognized": "Sorry, I’m not able to help with that. Is there anything else I can assist you with?",
     "sales_start": "Great! I'd be happy to help you with that. What are you interested in?",
     "sales_ask_vehicle_type": "What type of vehicle are you looking for? For example, a sedan, SUV, or truck?",
     "sales_ask_budget": "Do you have a budget in mind?",
@@ -63,26 +91,12 @@
           "type": "input",
           "data": {
             "label": "Greeting & Name",
-            "promptKey": "first_response_greeting"
+            "promptKey": "first_response_greeting",
+            "captureVariable": "customer_name"
           },
           "position": {
             "x": 250,
             "y": 0
-          }
-        },
-        {
-          "id": "fr2",
-          "type": "action",
-          "data": {
-            "label": "Extract Name",
-            "actionType": "extract_name",
-            "actionConfig": {
-              "target": "customer_name"
-            }
-          },
-          "position": {
-            "x": 250,
-            "y": 100
           }
         },
         {
@@ -94,7 +108,7 @@
           },
           "position": {
             "x": 250,
-            "y": 200
+            "y": 100
           }
         },
         {
@@ -106,19 +120,14 @@
           },
           "position": {
             "x": 250,
-            "y": 300
+            "y": 200
           }
         }
       ],
       "edges": [
         {
-          "id": "efr1-2",
+          "id": "efr1-3",
           "source": "fr1",
-          "target": "fr2"
-        },
-        {
-          "id": "efr2-3",
-          "source": "fr2",
           "target": "fr3"
         },
         {
