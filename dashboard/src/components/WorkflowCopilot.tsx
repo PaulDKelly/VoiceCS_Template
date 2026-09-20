@@ -158,14 +158,19 @@ export default function WorkflowCopilot({
                   </button>
                 )}
                 {m.proposal.kind === "new_client_draft" && m.proposal.clientDraft && (
-                  <button
-                    type="button"
-                    onClick={() => onPrepareClient(m.proposal!.clientDraft!)}
-                    className="inline-flex items-center gap-1.5 px-2 py-1 rounded bg-blue-600 hover:bg-blue-500 text-white"
-                    title="Review this proposal in the new client form"
-                  >
-                    <FilePlus2 size={13} /> Review new client
-                  </button>
+                  <div>
+                    <div className="mb-2 px-2 py-1.5 border border-amber-700 bg-amber-950/40 text-amber-200 text-[11px] rounded">
+                      Draft only. No client has been created yet.
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => onPrepareClient(m.proposal!.clientDraft!)}
+                      className="inline-flex items-center gap-1.5 px-2 py-1 rounded bg-blue-600 hover:bg-blue-500 text-white"
+                      title="Review this proposal and confirm client creation"
+                    >
+                      <FilePlus2 size={13} /> Review &amp; create client
+                    </button>
+                  </div>
                 )}
               </div>
             )}

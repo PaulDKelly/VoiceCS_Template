@@ -666,6 +666,7 @@ export default function Home() {
       .then((res) => res.ok ? res.json() : { voices: [] })
       .then((json) => setCreateClientVoices(Array.isArray(json?.voices) ? json.voices : []))
       .catch(() => setCreateClientVoices([]));
+    setMessage("Copilot client draft opened. Review the details and select Create Client to create it.");
     setModalOpen(true);
   };
 

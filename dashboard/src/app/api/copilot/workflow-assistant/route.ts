@@ -94,6 +94,45 @@ function validWorkflowDraft(candidate: unknown, current: AnyRecord) {
   return next;
 }
 
+function normalizeCopilotResult(result: CopilotResult, current: AnyRecord): CopilotResult {
+  const allowedKinds = new Set(["question", "diagnosis", "workflow_draft", "new_client_draft", "guidance"]);
+  if (!allowedKinds.has(result.kind)) result.kind = "guidance";
+  result.questions = Array.isArray(result.questions) ? result.questions.map(String).slice(0, 5) : [];
+  result.change_summary = Array.isArray(result.change_summary) ? result.change_summary.map(String).slice(0, 20) : [];
+
+  if (result.kind === "workflow_draft") {
+    result.proposed_config = validWorkflowDraft(result.proposed_config, current);
+    if (!result.proposed_config) throw new Error("The generated workflow draft failed structural validation.");
+    result.reply = "I have prepared a workflow draft. Nothing has been saved or deployed. Review the summary, apply it to the editor, then use Save when you are satisfied.";
+  } else {
+    result.proposed_config = null;
+  }
+
+  if (result.kind === "new_client_draft") {
+    const draft = result.client_draft && typeof result.client_draft === "object" ? result.client_draft : null;
+    const clientName = String(draft?.client_name || draft?.client_id || "").trim();
+    const industry = String(draft?.industry || "").trim();
+    if (!draft || !clientName || !industry) {
+      result.kind = "question";
+      result.client_draft = null;
+      result.reply = "I have not created a client yet. I still need the client name and industry before I can prepare the creation form.";
+      result.questions = [
+        ...(!clientName ? ["What should the new client be called?"] : []),
+        ...(!industry ? ["Which industry should the client belong to?"] : []),
+      ];
+    } else {
+      result.reply = `I have prepared a draft for ${clientName}. The client has not been created yet. Select Review & create client, check the details, then confirm Create Client.`;
+    }
+  } else {
+    result.client_draft = null;
+    if (/\b(i(?:'ve| have)|we(?:'ve| have))\s+(?:now\s+)?created\b/i.test(String(result.reply || ""))) {
+      result.reply = "I have not made that change. I can prepare a draft for you to review, but creation and saving require an explicit confirmation in the Workflow Manager.";
+    }
+  }
+
+  return result;
+}
+
 async function callAzureCopilot(args: {
   message: string;
   conversation: Array<{ role: string; text: string }>;
@@ -148,12 +187,7 @@ Do not modify phone routing, credentials, database credentials, authentication, 
   if (!response.ok) throw new Error(`Azure OpenAI request failed (${response.status}).`);
   const body = await response.json();
   const raw = String(body?.choices?.[0]?.message?.content || "");
-  const parsed = JSON.parse(raw) as CopilotResult;
-  if (parsed.kind === "workflow_draft") {
-    parsed.proposed_config = validWorkflowDraft(parsed.proposed_config, args.config);
-    if (!parsed.proposed_config) throw new Error("The generated workflow draft failed structural validation.");
-  }
-  return parsed;
+  return normalizeCopilotResult(JSON.parse(raw) as CopilotResult, args.config);
 }
 
 function collectKnowledgeNodes(config: AnyRecord) {
