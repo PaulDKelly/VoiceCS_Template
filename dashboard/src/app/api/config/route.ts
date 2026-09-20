@@ -419,8 +419,40 @@ function collectPromptKeysFromWorkflow(workflow: any): string[] {
 
 function defaultFirstResponseWorkflow() {
     return {
-        nodes: [{ id: '1', position: { x: 250, y: 50 }, data: { label: 'Start First Response', promptKey: 'first_response_greeting' }, type: 'custom_input' }],
-        edges: []
+        nodes: [
+            {
+                id: 'fr1',
+                type: 'input',
+                data: {
+                    label: 'Greeting & Name',
+                    promptKey: 'first_response_greeting',
+                    captureVariable: 'customer_name',
+                },
+                position: { x: 250, y: 0 },
+            },
+            {
+                id: 'fr3',
+                type: 'default',
+                data: {
+                    label: 'Ask Intent',
+                    promptKey: 'first_response_ask_intent',
+                },
+                position: { x: 250, y: 120 },
+            },
+            {
+                id: 'fr4',
+                type: 'action',
+                data: {
+                    label: 'Detect Intent',
+                    actionType: 'detect_intent',
+                },
+                position: { x: 250, y: 240 },
+            },
+        ],
+        edges: [
+            { id: 'efr1-3', source: 'fr1', target: 'fr3' },
+            { id: 'efr3-4', source: 'fr3', target: 'fr4' },
+        ],
     };
 }
 

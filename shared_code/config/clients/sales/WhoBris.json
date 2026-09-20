@@ -1,0 +1,108 @@
+{
+  "client_id": "WhoBris",
+  "industry": "sales",
+  "intents": [
+    "first_response",
+    "product_finder"
+  ],
+  "intent_routing_rules": {
+    "priority": [
+      "product_finder"
+    ],
+    "fallback_to_llm": false,
+    "product_finder": {
+      "enabled": true,
+      "keywords": [
+        "product",
+        "find",
+        "looking for",
+        "buy",
+        "recommend",
+        "help me choose"
+      ]
+    }
+  },
+  "workflows": {
+    "first_response": {
+      "nodes": [
+        {
+          "id": "fr1",
+          "type": "input",
+          "position": { "x": 250, "y": 0 },
+          "data": {
+            "label": "Greeting & Name",
+            "promptKey": "first_response_greeting",
+            "captureVariable": "customer_name"
+          }
+        },
+        {
+          "id": "fr3",
+          "type": "default",
+          "position": { "x": 250, "y": 120 },
+          "data": {
+            "label": "Ask Intent",
+            "promptKey": "first_response_ask_intent"
+          }
+        },
+        {
+          "id": "fr4",
+          "type": "action",
+          "position": { "x": 250, "y": 240 },
+          "data": {
+            "label": "Detect Intent",
+            "actionType": "detect_intent"
+          }
+        }
+      ],
+      "edges": [
+        { "id": "efr1-3", "source": "fr1", "target": "fr3" },
+        { "id": "efr3-4", "source": "fr3", "target": "fr4" }
+      ]
+    },
+    "product_finder": {
+      "nodes": [
+        {
+          "id": "pf1",
+          "type": "input",
+          "position": { "x": 250, "y": 0 },
+          "data": {
+            "label": "Product requirements",
+            "promptKey": "product_finder_ask_requirements",
+            "captureVariable": "product_requirements"
+          }
+        },
+        {
+          "id": "pf2",
+          "type": "default",
+          "position": { "x": 250, "y": 120 },
+          "data": {
+            "label": "Confirm requirements",
+            "promptKey": "product_finder_confirm"
+          }
+        }
+      ],
+      "edges": [
+        { "id": "epf1-2", "source": "pf1", "target": "pf2" }
+      ]
+    }
+  },
+  "prompts": {
+    "first_response_greeting": "Hi, I'm {assistant} with {brand}. Before we get into the details, can I take your name?",
+    "first_response_ask_intent": "Thanks, {name}. How can I help you today?",
+    "ask_name_retry": "Sorry, I didn't catch your name. Could you say it again?",
+    "intent_capture_retry": "Please briefly tell me what kind of product you are looking for.",
+    "intent_not_recognized": "I can help you find a product. What are you looking for?",
+    "product_finder_ask_requirements": "Of course. Tell me what you are looking for and what matters most to you.",
+    "product_finder_confirm": "Thanks, {name}. I've noted that you're looking for {product_requirements}."
+  },
+  "tts_provider": "elevenlabs",
+  "elevenlabs_voice_id": "CwhRBWXzGAHq8TQ4Fs17",
+  "brand_name": "WhoBris",
+  "assistant_name": "Baba",
+  "agent_name": "Baba",
+  "opening_hours": "9-5",
+  "tone": "arrogant, condescending",
+  "language": "en-GB",
+  "azure_ssml_lang": "en-GB",
+  "default_intent": "first_response"
+}
