@@ -28,3 +28,72 @@ body {
 html {
   scroll-behavior: smooth;
 }
+
+.tellio-manager {
+  color-scheme: dark;
+}
+
+.tellio-manager[data-theme="light"] {
+  color-scheme: light;
+}
+
+.tellio-manager[data-theme="light"] .bg-gray-950 { background-color: #eef2ef !important; }
+.tellio-manager[data-theme="light"] .bg-gray-900,
+.tellio-manager[data-theme="light"] .bg-gray-900\/70,
+.tellio-manager[data-theme="light"] .bg-gray-900\/60,
+.tellio-manager[data-theme="light"] .bg-gray-900\/50,
+.tellio-manager[data-theme="light"] .bg-gray-900\/30 { background-color: #f6f8f6 !important; }
+.tellio-manager[data-theme="light"] .bg-gray-800,
+.tellio-manager[data-theme="light"] .bg-gray-800\/90,
+.tellio-manager[data-theme="light"] .bg-gray-800\/50 { background-color: #ffffff !important; }
+.tellio-manager[data-theme="light"] .bg-gray-750,
+.tellio-manager[data-theme="light"] .bg-gray-750\/50,
+.tellio-manager[data-theme="light"] .bg-gray-700,
+.tellio-manager[data-theme="light"] .bg-gray-700\/30 { background-color: #edf1ee !important; }
+.tellio-manager[data-theme="light"] .bg-gray-600 { background-color: #dfe6e2 !important; }
+.tellio-manager[data-theme="light"] .bg-gray-500 { background-color: #c8d3cd !important; }
+
+.tellio-manager[data-theme="light"] .text-gray-100,
+.tellio-manager[data-theme="light"] .text-gray-200 { color: #17211d !important; }
+.tellio-manager[data-theme="light"] .text-gray-300 { color: #304139 !important; }
+.tellio-manager[data-theme="light"] .text-gray-400 { color: #53655c !important; }
+.tellio-manager[data-theme="light"] .text-gray-500 { color: #6b7b73 !important; }
+.tellio-manager[data-theme="light"] .text-white { color: #17211d !important; }
+
+.tellio-manager[data-theme="light"] .border-gray-700,
+.tellio-manager[data-theme="light"] .border-gray-700\/50 { border-color: #d5ddd9 !important; }
+.tellio-manager[data-theme="light"] .border-gray-600 { border-color: #bdc9c3 !important; }
+.tellio-manager[data-theme="light"] .border-gray-500 { border-color: #aebcb5 !important; }
+
+.tellio-manager[data-theme="light"] input,
+.tellio-manager[data-theme="light"] select,
+.tellio-manager[data-theme="light"] textarea { color: #17211d !important; }
+.tellio-manager[data-theme="light"] input::placeholder,
+.tellio-manager[data-theme="light"] textarea::placeholder { color: #7a8981 !important; }
+
+.tellio-manager[data-theme="light"] .hover\:bg-gray-700:hover { background-color: #e2e8e4 !important; }
+.tellio-manager[data-theme="light"] .hover\:bg-gray-600:hover { background-color: #d8e0db !important; }
+.tellio-manager[data-theme="light"] .hover\:text-white:hover { color: #17211d !important; }
+
+.tellio-manager[data-theme="light"] .bg-blue-600,
+.tellio-manager[data-theme="light"] .bg-blue-900,
+.tellio-manager[data-theme="light"] .bg-green-900,
+.tellio-manager[data-theme="light"] .bg-purple-900,
+.tellio-manager[data-theme="light"] .bg-red-600,
+.tellio-manager[data-theme="light"] .bg-\[\#17211d\],
+.tellio-manager[data-theme="light"] .bg-\[\#ef5b4c\] { color: #ffffff !important; }
+.tellio-manager[data-theme="light"] .bg-blue-600 .text-white,
+.tellio-manager[data-theme="light"] .bg-blue-900 .text-white,
+.tellio-manager[data-theme="light"] .bg-green-900 .text-white,
+.tellio-manager[data-theme="light"] .bg-purple-900 .text-white,
+.tellio-manager[data-theme="light"] .bg-red-600 .text-white,
+.tellio-manager[data-theme="light"] .bg-\[\#17211d\] .text-white,
+.tellio-manager[data-theme="light"] .bg-\[\#ef5b4c\] .text-white { color: #ffffff !important; }
+
+.tellio-manager[data-theme="light"] .react-flow__pane { background-color: #f6f8f6; }
+.tellio-manager[data-theme="light"] .react-flow__controls button {
+  background-color: #ffffff;
+  border-color: #d5ddd9;
+  color: #17211d;
+}
+.tellio-manager[data-theme="light"] .react-flow__minimap { background-color: #edf1ee; }

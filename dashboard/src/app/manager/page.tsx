@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type DragEvent } from "react";
-import { Save, Plus, History, LogOut, Settings, ChevronDown, ChevronRight, RefreshCw } from "lucide-react";
+import { Save, Plus, History, LogOut, Settings, ChevronDown, ChevronRight, RefreshCw, Sun, Moon } from "lucide-react";
 import PromptEditor from "@/components/PromptEditor";
 import WorkflowVisualizer from "@/components/WorkflowVisualizer";
 import ClientConfigForm from "@/components/ClientConfigForm";
@@ -102,6 +102,8 @@ type CallTraceEntry = {
 export default function Home() {
   const { data: session, status } = useSession();
   const [user, setUser] = useState<any | null>(null);
+  const [theme, setTheme] = useState<"light" | "dark">("light");
+  const [themeReady, setThemeReady] = useState(false);
 
   const [list, setList] = useState<ConfigList | null>(null);
   const [phoneMappings, setPhoneMappings] = useState<Record<string, { client_id: string, industry: string }>>({});
@@ -199,6 +201,16 @@ export default function Home() {
   const simSentAudioRef = useRef<number>(0);
   const simMicActiveLoggedRef = useRef(false);
   const simMicWarningTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    const savedTheme = window.localStorage.getItem("tellio-manager-theme");
+    if (savedTheme === "dark" || savedTheme === "light") setTheme(savedTheme);
+    setThemeReady(true);
+  }, []);
+
+  useEffect(() => {
+    if (themeReady) window.localStorage.setItem("tellio-manager-theme", theme);
+  }, [theme, themeReady]);
 
   useEffect(() => {
     if (status === "authenticated") {
@@ -1527,12 +1539,12 @@ export default function Home() {
   const compactClientListClass = "max-h-[11.5rem]";
 
   if (status === "loading") {
-    return <div className="flex items-center justify-center h-screen bg-[#17211d] text-white">Loading Tellio...</div>;
+    return <div className="tellio-manager flex items-center justify-center h-screen bg-gray-900 text-gray-100" data-theme={theme}>Loading Tellio...</div>;
   }
 
   if (!session) {
     return (
-      <div className="flex items-center justify-center min-h-screen bg-[#17211d] text-white p-4">
+      <div className="tellio-manager flex items-center justify-center min-h-screen bg-gray-900 text-gray-100 p-4" data-theme={theme}>
         <div className="w-full max-w-md bg-gray-800 border border-gray-700 rounded-lg p-6">
           <TellioBrand inverse subtitle="Workflow Manager" />
           <h2 className="text-xl font-semibold mt-8 mb-1">Welcome back</h2>
@@ -1622,10 +1634,10 @@ export default function Home() {
     );
   }
 
-  if (!list || !user) return <div className="p-10 bg-gray-900 text-white min-h-screen">Loading configuration...</div>;
+  if (!list || !user) return <div className="tellio-manager p-10 bg-gray-900 text-gray-100 min-h-screen" data-theme={theme}>Loading configuration...</div>;
 
   return (
-    <div className="flex h-screen bg-gray-900 text-gray-100 font-sans relative">
+    <div className="tellio-manager flex h-screen bg-gray-900 text-gray-100 font-sans relative" data-theme={theme}>
       {/* Sidebar */}
       <div className={`${sidebarWidthClass} bg-gray-800 border-r border-gray-700 overflow-y-auto flex flex-col transition-all duration-200`}>
         <div className={`${sidebarSectionPaddingClass} border-b border-gray-700 bg-[#17211d]`}>
@@ -1641,8 +1653,7 @@ export default function Home() {
               </span>
             </div>
             <div className="flex items-center gap-2 relative">
-              {(canManageUsers || canViewPhoneMappings) && (
-                <div className="relative">
+              <div className="relative">
                   <button
                     onClick={() => setSettingsOpen(!settingsOpen)}
                     className="text-gray-400 hover:text-white"
@@ -1652,6 +1663,13 @@ export default function Home() {
                   </button>
                   {settingsOpen && (
                     <div className="absolute right-0 mt-2 w-48 bg-gray-800 border border-gray-700 rounded shadow-lg z-50 overflow-hidden">
+                      <button
+                        onClick={() => setTheme((current) => current === "light" ? "dark" : "light")}
+                        className="w-full flex items-center gap-2 text-left px-4 py-2 text-sm text-gray-300 hover:bg-gray-700 hover:text-white"
+                      >
+                        {theme === "light" ? <Moon size={15} /> : <Sun size={15} />}
+                        {theme === "light" ? "Dark mode" : "Light mode"}
+                      </button>
                       {canViewPhoneMappings && (
                         <button
                           onClick={() => {
@@ -1679,8 +1697,7 @@ export default function Home() {
                       )}
                     </div>
                   )}
-                </div>
-              )}
+              </div>
               <button onClick={() => signOut()} className="text-red-400 hover:text-red-300" title="Sign Out">
                 <LogOut size={16} />
               </button>
