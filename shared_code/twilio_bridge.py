@@ -99,6 +99,8 @@ class TwilioBridge:
         self._last_user_speech_at = 0.0
         self._last_prompt_at = 0.0
         self._expecting_name = False
+        self._name_hearing_attempts = 0
+        self._pending_name_confirmation = None
         
         self.stt_language = os.getenv("AZURE_STT_LANGUAGE", "en-GB")
 
@@ -550,12 +552,25 @@ class TwilioBridge:
                     logger.info(f"User said: {text}")
                 if alternatives:
                     logger.info("STT alternatives: %s", alternatives)
+                if self._expecting_name and self._pending_name_confirmation:
+                    if hasattr(self, "loop"):
+                        asyncio.run_coroutine_threadsafe(
+                            self._handle_name_confirmation(text), self.loop
+                        )
+                    return
                 if self._expecting_name:
                     resolved_name = resolve_recognition_candidates(
                         alternatives or [{"text": text, "confidence": confidence or 0.0}]
                     )
                     if resolved_name:
                         text, resolved_confidence = resolved_name
+                        raw_confidence = confidence or 0.0
+                        if raw_confidence < self.min_stt_confidence:
+                            if hasattr(self, "loop"):
+                                asyncio.run_coroutine_threadsafe(
+                                    self._handle_uncertain_name(text), self.loop
+                                )
+                            return
                         confidence = max(
                             resolved_confidence,
                             self.min_name_confidence,
@@ -586,6 +601,43 @@ class TwilioBridge:
                     asyncio.run_coroutine_threadsafe(
                         self._queue_stable_transcript(text, confidence), self.loop
                     )
+
+    async def _handle_uncertain_name(self, resolved_name: str):
+        if not self._is_active or not self._expecting_name:
+            return
+        self._cancel_no_response_task()
+        self._name_hearing_attempts += 1
+        if self._name_hearing_attempts == 1:
+            await self._speak_prompt(
+                "I may have misheard that. Could you say your name once more, slowly?"
+            )
+        else:
+            self._pending_name_confirmation = resolved_name
+            await self._speak_prompt(f"Did you say {resolved_name}?")
+        self._schedule_no_response_reprompt()
+
+    async def _handle_name_confirmation(self, text: str):
+        if not self._is_active or not self._pending_name_confirmation:
+            return
+        self._cancel_no_response_task()
+        cleaned = re.sub(r"[^a-z ]", "", str(text or "").lower()).strip()
+        affirmative = cleaned in {"yes", "yeah", "yep", "correct", "right", "that's right", "thats right"}
+        negative = cleaned in {"no", "nope", "incorrect", "wrong", "not right", "that's wrong", "thats wrong"}
+        if affirmative:
+            confirmed_name = self._pending_name_confirmation
+            self._pending_name_confirmation = None
+            self._name_hearing_attempts = 0
+            await self._queue_stable_transcript(confirmed_name, self.min_stt_confidence)
+            return
+        if negative:
+            self._pending_name_confirmation = None
+            self._name_hearing_attempts = 0
+            await self._speak_prompt("No problem. What name would you like me to use?")
+        else:
+            await self._speak_prompt(
+                f"Please say yes or no. Did you say {self._pending_name_confirmation}?"
+            )
+        self._schedule_no_response_reprompt()
 
     async def _queue_stable_transcript(self, text: str, confidence: Optional[float]):
         """Coalesce adjacent Azure final segments before advancing a workflow."""
@@ -707,7 +759,12 @@ class TwilioBridge:
                     return
                 self._no_response_reprompts += 1
                 if self._expecting_name:
-                    reprompt = "Take your time. What name would you like me to use?"
+                    if self._pending_name_confirmation:
+                        reprompt = (
+                            f"Was that {self._pending_name_confirmation}? Please say yes or no."
+                        )
+                    else:
+                        reprompt = "Take your time. What name would you like me to use?"
                 else:
                     reprompt = "Sorry, I didn't catch that. Could you repeat that?"
                 await self._speak_prompt(reprompt)
@@ -872,6 +929,9 @@ class TwilioBridge:
                 or "catch your name" in lower_reply
                 or ("your name" in lower_reply and "repeat" in lower_reply)
             )
+            if not self._expecting_name:
+                self._name_hearing_attempts = 0
+                self._pending_name_confirmation = None
         
         if reply_text:
             logger.info(f"Agent reply: {reply_text}")
