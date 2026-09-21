@@ -177,10 +177,16 @@ def _map_dtmf_to_intent(digit: str, config: dict) -> Optional[str]:
 
 
 def _first_response_intent_prompt(config: dict) -> str:
+    configured = _get_prompt_template(config, "intent_capture_retry")
+    if configured:
+        return configured
+    return _scope_refusal_prompt(config)
+
+
+def _scope_refusal_prompt(config: dict) -> str:
     return (
-        _get_prompt_template(config, "intent_capture_retry")
-        or "I did not catch that. Please say warranty, service, sales, finance, or general enquiry. "
-           "You can also press 1 for warranty, 2 for service, 3 for sales, 4 for finance."
+        _get_prompt_template(config, "scope_refusal")
+        or "I'm sorry, I can't help with that. Have you contacted the right company?"
     )
 
 

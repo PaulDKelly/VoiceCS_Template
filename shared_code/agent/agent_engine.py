@@ -4,6 +4,7 @@ from shared_code.routing.intent_router import detect_intent
 from shared_code.agent.workflow_router import route_to_workflow
 from shared_code.utils.session import load_session, save_session
 from shared_code.utils.config_loader import load_merged_config
+from shared_code.voice.name_resolution import resolve_person_name
 
 
 def run_agent_step(session_id: str, text: str) -> dict:
@@ -98,4 +99,4 @@ def _extract_name_smartly(text: str) -> str:
     }
     if len(cleaned) < 2 or cleaned.lower() in banned:
         return None
-    return " ".join(word.capitalize() for word in words)
+    return resolve_person_name(cleaned)

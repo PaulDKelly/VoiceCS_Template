@@ -12,6 +12,15 @@ def route_to_workflow(intent: str, session_id: str, text: str) -> dict:
     try:
         session = load_session(session_id)
         config = load_merged_config(session.get("client_id"), session.get("industry"))
+        configured_intents = {
+            str(value).strip() for value in (config.get("intents") or []) if str(value).strip()
+        }
+        if configured_intents and intent != "first_response" and intent not in configured_intents:
+            prompt = (
+                (config.get("prompts") or {}).get("scope_refusal")
+                or "I'm sorry, I can't help with that. Have you contacted the right company?"
+            )
+            return {"prompt": prompt, "session": session, "config": config}
         custom_workflow = config.get("workflows", {}).get(intent)
         if custom_workflow:
             # Dashboard-created workflows are expected to run automatically.

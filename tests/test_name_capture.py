@@ -14,3 +14,8 @@ class NameCaptureTests(unittest.TestCase):
         self.assertIsNone(_extract_name_smartly("Okay"))
         self.assertIsNone(_extract_name_smartly("I need help with an order"))
 
+    def test_resolves_close_speech_guess_to_common_name(self):
+        self.assertEqual(_extract_name_smartly("Pull"), "Paul")
+
+    def test_retains_unfamiliar_but_valid_name(self):
+        self.assertEqual(_extract_name_smartly("Zarek"), "Zarek")
