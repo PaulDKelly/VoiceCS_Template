@@ -481,7 +481,16 @@ def handle_generic_workflow(session_id: str, text: str) -> dict:
     
     return _process_node(next_node_id, nodes, edges, session, config, session_id)
 
-def _process_node(node_id: str, nodes: list, edges: list, session: dict, config: dict, session_id: str) -> dict:
+def _process_node(
+    node_id: str,
+    nodes: list,
+    edges: list,
+    session: dict,
+    config: dict,
+    session_id: str,
+    visited: Optional[set[str]] = None,
+) -> dict:
+    visited = set(visited or ())
     node = next((n for n in nodes if n["id"] == node_id), None)
     if not node:
          return {"prompt": "Workflow Error: Node not found.", "session": session, "config": config}
@@ -523,7 +532,7 @@ def _process_node(node_id: str, nodes: list, edges: list, session: dict, config:
             next_id = outgoing[0]["target"]
             session["current_node_id"] = next_id
             save_session(session_id, session)
-            return _process_node(next_id, nodes, edges, session, config, session_id)
+            return _process_node(next_id, nodes, edges, session, config, session_id, visited | {node_id})
         else:
             return {"prompt": "I've processed your request. Is there anything else? [HANGUP]", "session": session, "config": config}
 
@@ -535,6 +544,36 @@ def _process_node(node_id: str, nodes: list, edges: list, session: dict, config:
     prompt_key = data.get("promptKey")
     prompt_key_with_name = data.get("promptKeyWithName")
     capture_var = data.get("captureVariable")
+    captured_value = session.get(capture_var) if capture_var else None
+    has_captured_value = captured_value is not None and (
+        not isinstance(captured_value, str) or bool(captured_value.strip())
+    )
+    if (
+        capture_var
+        and has_captured_value
+        and data.get("alwaysAsk") is not True
+        and node_id not in visited
+    ):
+        outgoing = [e for e in edges if e["source"] == node_id]
+        if outgoing:
+            route_text = str(session.get("_last_user_input") or "")
+            next_id = _decide_next_node(route_text, outgoing, nodes, session, config)
+            if next_id:
+                print(
+                    f"DEBUG: Skipping satisfied capture node '{node_id}' ({capture_var}).",
+                    flush=True,
+                )
+                session["current_node_id"] = next_id
+                save_session(session_id, session)
+                return _process_node(
+                    next_id,
+                    nodes,
+                    edges,
+                    session,
+                    config,
+                    session_id,
+                    visited | {node_id},
+                )
     label_lower = label.lower()
     is_utility_node = (
         node_type in ("input", "custom_input")
@@ -554,7 +593,7 @@ def _process_node(node_id: str, nodes: list, edges: list, session: dict, config:
             if next_id:
                 session["current_node_id"] = next_id
                 save_session(session_id, session)
-                return _process_node(next_id, nodes, edges, session, config, session_id)
+                return _process_node(next_id, nodes, edges, session, config, session_id, visited | {node_id})
 
     # 4. Generate Prompt
     data = node.get("data", {}) or {}

@@ -16,6 +16,7 @@ from shared_code.voice.turn_detection import (
     DuplicateUtteranceGuard,
     build_typing_ulaw,
 )
+from shared_code.voice.conversation_runtime import ConversationRuntime, TurnToken
 
 logger = logging.getLogger("twilio-bridge")
 
@@ -73,9 +74,14 @@ class TwilioBridge:
             window_seconds=float(os.getenv("DUPLICATE_UTTERANCE_WINDOW_S", "1.75"))
         )
         self._turn_lock = asyncio.Lock()
+        self._runtime = ConversationRuntime()
+        self._transcript_task = None
+        self._pending_transcript = ""
+        self._pending_confidence = None
+        self._transcript_settle_s = float(os.getenv("TRANSCRIPT_SETTLE_MS", "320")) / 1000.0
         self._mark_counter = 0
         self._pending_marks = {}
-        self._progress_delay_s = float(os.getenv("PROGRESS_FEEDBACK_DELAY_S", "0.9"))
+        self._progress_delay_s = float(os.getenv("PROGRESS_FEEDBACK_DELAY_S", "2.0"))
         self._progress_typing_enabled = _to_bool(os.getenv("PROGRESS_TYPING_ENABLED", "1"))
         self._progress_index = 0
         self._progress_active = False
@@ -172,6 +178,7 @@ class TwilioBridge:
     async def handle_websocket(self, websocket):
         self.websocket = websocket
         self._is_active = True
+        self._runtime.start_listening()
         logger.info("Starting WebSocket loop")
 
         # Get baseline from query params (passed from twilio_voice_handler in bot_main.py)
@@ -480,6 +487,7 @@ class TwilioBridge:
                         elapsed_ms = (time.monotonic() - self._speaking_started_at) * 1000.0
                         if elapsed_ms >= self._barge_in_threshold_ms:
                             self._barge_in_triggered = True
+                            self._runtime.interrupt()
                             logger.info(f"Sustained caller speech triggered barge-in after {elapsed_ms:.0f}ms.")
                             await self._send_clear_to_twilio()
 
@@ -515,6 +523,9 @@ class TwilioBridge:
         finally:
             logger.info("Cleaning up WebSocket and Recognizer")
             self._is_active = False
+            self._runtime.close()
+            if self._transcript_task and not self._transcript_task.done():
+                self._transcript_task.cancel()
             self._cancel_no_response_task()
             self._stop_recognition()
             for future in self._pending_marks.values():
@@ -542,15 +553,49 @@ class TwilioBridge:
                 self._last_user_speech_at = time.monotonic()
                 self._no_response_reprompts = 0
                 self._cancel_no_response_task()
-                # We need to bridge from Sync Callback -> Async Agent/TTS
-                if self._speaking and not self._barge_in_triggered:
-                    logger.info("Ignoring STT while TTS is still speaking.")
+                if (
+                    (self._speaking and not self._barge_in_triggered)
+                    or not self._runtime.may_accept_transcript(self._barge_in_triggered)
+                ):
+                    logger.info("Ignoring STT while conversation phase is %s.", self._runtime.phase.value)
                     return
                 if self._duplicate_guard.is_duplicate(text):
                     logger.info("Ignoring duplicate final STT result: %r", text)
                     return
                 if hasattr(self, 'loop'):
-                     asyncio.run_coroutine_threadsafe(self._process_text(text, confidence=confidence), self.loop)
+                    asyncio.run_coroutine_threadsafe(
+                        self._queue_stable_transcript(text, confidence), self.loop
+                    )
+
+    async def _queue_stable_transcript(self, text: str, confidence: Optional[float]):
+        """Coalesce adjacent Azure final segments before advancing a workflow."""
+        cleaned = str(text or "").strip()
+        if not cleaned or not self._is_active:
+            return
+        self._pending_transcript = " ".join(
+            part for part in (self._pending_transcript, cleaned) if part
+        ).strip()
+        if confidence is not None:
+            self._pending_confidence = max(
+                confidence,
+                self._pending_confidence if self._pending_confidence is not None else confidence,
+            )
+        if self._transcript_task and not self._transcript_task.done():
+            self._transcript_task.cancel()
+
+        async def _commit():
+            try:
+                await asyncio.sleep(max(0.0, self._transcript_settle_s))
+                utterance = self._pending_transcript
+                utterance_confidence = self._pending_confidence
+                self._pending_transcript = ""
+                self._pending_confidence = None
+                if utterance and self._is_active:
+                    await self._process_text(utterance, confidence=utterance_confidence)
+            except asyncio.CancelledError:
+                return
+
+        self._transcript_task = asyncio.create_task(_commit())
 
     def _on_canceled(self, evt):
         logger.warning(f"Speech canceled: {evt}")
@@ -628,8 +673,11 @@ class TwilioBridge:
 
         self._no_response_task = asyncio.create_task(_watchdog())
 
-    async def _speak_prompt(self, prompt: str):
+    async def _speak_prompt(self, prompt: str, token: Optional[TurnToken] = None):
         if hasattr(self, "_hanging_up") and self._hanging_up:
+            return
+        if token and not self._runtime.begin_speaking(token):
+            logger.info("Discarding speech for stale turn %s.", token.generation)
             return
         self._barge_in_triggered = False
         self._activity_detector.reset()
@@ -651,6 +699,8 @@ class TwilioBridge:
             self._activity_detector.reset()
             self._last_prompt_at = time.monotonic()
             self._post_tts_guard_until = time.monotonic() + (max(self._echo_guard_ms, 0) / 1000.0)
+            if token:
+                self._runtime.finish_turn(token)
 
     async def _process_text(self, text, confidence: Optional[float] = None):
         if hasattr(self, "_hanging_up") and self._hanging_up:
@@ -671,6 +721,12 @@ class TwilioBridge:
                 logger.info("High-noise mode: asking caller to repeat.")
                 await self._reprompt_for_noise()
                 return
+
+        try:
+            turn_token = self._runtime.begin_turn(str(text or ""))
+        except RuntimeError:
+            logger.info("Ignoring input because the conversation runtime is ending.")
+            return
 
         # 1. Get Agent Response
         logger.info(f"Processing text: {text} | Session: {self.session_id}")
@@ -700,6 +756,11 @@ class TwilioBridge:
                 "error": str(e),
                 "latency_ms": int((time.time() - started_at) * 1000),
             })
+            self._runtime.finish_turn(turn_token)
+            return
+
+        if not self._runtime.is_current(turn_token):
+            logger.info("Discarding completed work for stale turn %s.", turn_token.generation)
             return
 
         reply_text = response.get("prompt")
@@ -747,6 +808,8 @@ class TwilioBridge:
             "handoff": bool(next_intent and prev_intent and next_intent != prev_intent),
             "latency_ms": int((time.time() - started_at) * 1000),
             "test_mode": bool(self._emit_sim_events),
+            "turn_generation": turn_token.generation,
+            "conversation_phase": self._runtime.phase.value,
         })
         
         # Check for Hangup Signal
@@ -754,8 +817,7 @@ class TwilioBridge:
         if reply_text and "[HANGUP]" in reply_text:
             reply_text = reply_text.replace("[HANGUP]", "").strip()
             should_hangup = True
-            self._hanging_up = True # Block further inputs
-            logger.info("Hangup signal detected. Blocking further input.")
+            logger.info("Hangup signal detected. Ending after final prompt.")
 
         if reply_text:
             lower_reply = reply_text.lower()
@@ -768,10 +830,12 @@ class TwilioBridge:
         if reply_text:
             logger.info(f"Agent reply: {reply_text}")
             # 2. Convert to Speech
-            await self._speak_prompt(reply_text)
+            await self._speak_prompt(reply_text, turn_token)
             self._schedule_no_response_reprompt()
             
         if should_hangup:
+            self._hanging_up = True
+            self._runtime.begin_ending()
             logger.info("Closing socket due to HANGUP signal.")
             # Give a small delay for audio to flush
             await asyncio.sleep(8)
