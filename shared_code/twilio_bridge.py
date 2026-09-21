@@ -91,7 +91,7 @@ class TwilioBridge:
         self._echo_guard_ms = int(os.getenv("AZURE_STT_ECHO_GUARD_MS", "900"))
         self._post_tts_guard_until = 0.0
         self._clarify_prompt = "Sorry, I caught background noise there. Could you repeat that briefly?"
-        self._no_response_timeout_s = float(os.getenv("NO_RESPONSE_TIMEOUT_S", "6.5"))
+        self._no_response_timeout_s = float(os.getenv("NO_RESPONSE_TIMEOUT_S", "9.0"))
         self._no_response_reprompt_max = int(os.getenv("NO_RESPONSE_REPROMPT_MAX", "2"))
         self._no_response_reprompts = 0
         self._no_response_task = None
@@ -542,10 +542,13 @@ class TwilioBridge:
             text = evt.result.text
             if text:
                 confidence = self._extract_confidence(evt.result)
+                alternatives = self._extract_alternatives(evt.result)
                 if confidence is not None:
                     logger.info(f"User said: {text} (confidence={confidence:.2f})")
                 else:
                     logger.info(f"User said: {text}")
+                if alternatives:
+                    logger.info("STT alternatives: %s", alternatives)
                 if self._emit_sim_events and hasattr(self, "loop"):
                     asyncio.run_coroutine_threadsafe(
                         self._send_sim_event("transcript", text=text, confidence=confidence),
@@ -615,6 +618,22 @@ class TwilioBridge:
         except Exception:
             return None
 
+    def _extract_alternatives(self, result) -> list[dict]:
+        try:
+            raw = result.properties.get(speechsdk.PropertyId.SpeechServiceResponse_JsonResult)
+            parsed = json.loads(raw) if raw else {}
+            alternatives = []
+            for candidate in (parsed.get("NBest") or [])[:5]:
+                display = str(candidate.get("Display") or candidate.get("Lexical") or "").strip()
+                if display:
+                    alternatives.append({
+                        "text": display,
+                        "confidence": round(float(candidate.get("Confidence") or 0.0), 3),
+                    })
+            return alternatives
+        except Exception:
+            return []
+
     def _is_likely_noise(self, text: str, confidence: Optional[float]) -> bool:
         cleaned = re.sub(r"[^A-Za-z0-9\s]", " ", str(text or "")).strip().lower()
         if not cleaned:
@@ -637,7 +656,12 @@ class TwilioBridge:
     async def _reprompt_for_noise(self):
         if hasattr(self, "_hanging_up") and self._hanging_up:
             return
-        await self._speak_prompt(self._clarify_prompt)
+        if self._expecting_name:
+            await asyncio.sleep(0.75)
+            prompt = "I may have misheard that. Could you say your name once more, slowly?"
+        else:
+            prompt = self._clarify_prompt
+        await self._speak_prompt(prompt)
         # Let callers answer quickly after a noise clarify prompt.
         self._post_tts_guard_until = time.monotonic() + 0.2
         # Ensure we never go silent if STT misses the immediate retry.

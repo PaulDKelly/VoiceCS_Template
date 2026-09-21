@@ -1375,7 +1375,9 @@ export default function Home() {
         const ulaw = new Uint8Array(downsampled.length);
         let sumSquares = 0;
         for (let i = 0; i < downsampled.length; i += 1) {
-          const sample = Math.max(-1, Math.min(1, downsampled[i] * 2.5));
+          // Browser auto-gain already normalizes microphone input. Additional
+          // amplification clips consonants and materially hurts name recognition.
+          const sample = Math.max(-1, Math.min(1, downsampled[i]));
           sumSquares += sample * sample;
           ulaw[i] = pcm16ToUlaw(sample);
         }
