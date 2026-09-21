@@ -1359,7 +1359,7 @@ export default function ClientConfigForm({ jsonContent, onChange, assignedPhoneN
                 <section className="bg-gray-800 rounded-lg p-6 border border-gray-700">
                     <h3 className="text-lg font-semibold text-blue-400 mb-4">Database Connections</h3>
                     <p className="text-sm text-gray-400 mb-4">
-                        Create reusable database connections for Database Query action nodes.
+                        Create reusable database connections for Database Query action nodes. Changes remain a draft until you use the main Save button.
                     </p>
                     <div className="space-y-4">
                         {Object.entries(config.database_connections || {}).map(([connKey, conn]: any) => (

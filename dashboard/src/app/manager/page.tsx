@@ -131,6 +131,7 @@ export default function Home() {
   });
 
   const [editorContent, setEditorContent] = useState<string>("");
+  const [savedEditorContent, setSavedEditorContent] = useState<string>("");
   const [message, setMessage] = useState<string>("");
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -211,6 +212,16 @@ export default function Home() {
   useEffect(() => {
     if (themeReady) window.localStorage.setItem("tellio-manager-theme", theme);
   }, [theme, themeReady]);
+
+  useEffect(() => {
+    if (editorContent === savedEditorContent) return;
+    const warnBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warnBeforeUnload);
+    return () => window.removeEventListener("beforeunload", warnBeforeUnload);
+  }, [editorContent, savedEditorContent]);
 
   useEffect(() => {
     if (status === "authenticated") {
@@ -301,6 +312,9 @@ export default function Home() {
   }
 
   async function loadConfig(type: "industry" | "client", industry: string, client?: string) {
+    if (editorContent !== savedEditorContent && !confirm("Discard your unsaved configuration changes?")) {
+      return;
+    }
     if (activeTab === 'phone_mappings' || activeTab === 'users') {
       setActiveTab("workflows");
     }
@@ -351,7 +365,9 @@ export default function Home() {
       return;
     }
 
-    setEditorContent(JSON.stringify(json, null, 2));
+    const loadedContent = JSON.stringify(json, null, 2);
+    setEditorContent(loadedContent);
+    setSavedEditorContent(loadedContent);
     setMessage("");
     setIsLoadingConfig(false);
     try {
@@ -558,11 +574,12 @@ export default function Home() {
 
       if (res.ok) {
         console.log('[SAVE DEBUG] Save successful!');
+        setSavedEditorContent(editorContent);
         setMessage("Saved successfully!");
       } else {
         const errorText = await res.text();
         console.error('[SAVE DEBUG] Save failed:', errorText);
-        setMessage("Error saving.");
+        setMessage(`Error saving: ${errorText || `HTTP ${res.status}`}`);
       }
     } catch (e) {
       console.error('[SAVE DEBUG] Exception:', e);
@@ -2023,8 +2040,13 @@ export default function Home() {
                   disabled={!canSave}
                   className={`flex items-center gap-2 px-4 py-2 rounded font-medium transition text-white ${canSave ? "bg-blue-600 hover:bg-blue-500" : "bg-gray-700 cursor-not-allowed text-gray-400"}`}
                 >
-                  <Save size={18} /> Save
+                  <Save size={18} /> {editorContent !== savedEditorContent ? "Save changes" : "Save"}
                 </button>
+                {editorContent !== savedEditorContent && (
+                  <span className="text-xs font-medium text-amber-300" role="status">
+                    Unsaved changes
+                  </span>
+                )}
               </div>
             </div>
 

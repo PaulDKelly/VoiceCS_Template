@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { FilePlus2, Send, WandSparkles } from "lucide-react";
 
 type CopilotProposal = {
-  kind: "workflow_draft" | "new_client_draft";
+  kind: "workflow_draft" | "config_draft" | "new_client_draft";
   proposedConfig?: Record<string, any>;
   clientDraft?: Record<string, any>;
   changeSummary: string[];
@@ -87,8 +87,8 @@ export default function WorkflowCopilot({
           : reply;
         const summary = Array.isArray(data?.change_summary) ? data.change_summary.map(String) : [];
         let proposal: CopilotProposal | undefined;
-        if (data?.kind === "workflow_draft" && data?.proposed_config) {
-          proposal = { kind: "workflow_draft", proposedConfig: data.proposed_config, changeSummary: summary };
+        if (["workflow_draft", "config_draft"].includes(data?.kind) && data?.proposed_config) {
+          proposal = { kind: data.kind, proposedConfig: data.proposed_config, changeSummary: summary };
         } else if (data?.kind === "new_client_draft" && data?.client_draft) {
           proposal = { kind: "new_client_draft", clientDraft: data.client_draft, changeSummary: summary };
         }
@@ -147,7 +147,7 @@ export default function WorkflowCopilot({
                     ))}
                   </ul>
                 )}
-                {m.proposal.kind === "workflow_draft" && m.proposal.proposedConfig && (
+                {["workflow_draft", "config_draft"].includes(m.proposal.kind) && m.proposal.proposedConfig && (
                   <button
                     type="button"
                     onClick={() => onApplyDraft(m.proposal!.proposedConfig!, m.proposal!.changeSummary)}
@@ -178,6 +178,9 @@ export default function WorkflowCopilot({
         ))}
       </div>
       <div className="p-2 border-t border-gray-700">
+        <div className="mb-2 text-[11px] text-amber-300">
+          Use environment-variable names for passwords and API keys. Do not paste secret values here.
+        </div>
         <textarea
           value={input}
           onChange={(e) => setInput(e.target.value)}
@@ -188,7 +191,7 @@ export default function WorkflowCopilot({
               void sendMessage();
             }
           }}
-          placeholder="Describe a workflow, request a node, diagnose an issue, or create a client..."
+          placeholder="Describe a workflow, add a connection, diagnose an issue, or create a client..."
         />
         <button
           onClick={sendMessage}

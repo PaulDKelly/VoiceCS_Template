@@ -6,13 +6,47 @@ export const dynamic = "force-dynamic";
 type AnyRecord = Record<string, any>;
 
 type CopilotResult = {
-  kind: "question" | "diagnosis" | "workflow_draft" | "new_client_draft" | "guidance";
+  kind: "question" | "diagnosis" | "workflow_draft" | "config_draft" | "new_client_draft" | "guidance";
   reply: string;
   questions?: string[];
   proposed_config?: AnyRecord | null;
   client_draft?: AnyRecord | null;
   change_summary?: string[];
 };
+
+const DATABASE_CONNECTION_TYPES = new Set(["postgres", "mysql", "sqlserver", "sqlite", "supabase_rest", "custom"]);
+const KNOWLEDGE_CONNECTION_TYPES = new Set(["azure_search", "supabase_rest", "postgres"]);
+const INLINE_SECRET_KEYS = ["password", "supabase_key", "api_key", "connection_string"];
+
+function validConnectionDraft(candidate: unknown, current: AnyRecord) {
+  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return null;
+  const proposed = candidate as AnyRecord;
+  const next: AnyRecord = { ...current };
+
+  for (const field of ["database_connections", "knowledge_base_connections"]) {
+    const connections = proposed[field];
+    if (connections == null) continue;
+    if (typeof connections !== "object" || Array.isArray(connections)) return null;
+    const existingConnections = current?.[field] && typeof current[field] === "object" ? current[field] : {};
+    if (Object.keys(existingConnections).some((key) => !(key in connections))) return null;
+    for (const [key, raw] of Object.entries(connections as AnyRecord)) {
+      if (!/^[A-Za-z0-9_-]+$/.test(key) || !raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+      const connection = raw as AnyRecord;
+      const type = String(connection.type || "postgres").trim().toLowerCase();
+      const allowedTypes = field === "database_connections" ? DATABASE_CONNECTION_TYPES : KNOWLEDGE_CONNECTION_TYPES;
+      if (!allowedTypes.has(type)) return null;
+      for (const secretKey of INLINE_SECRET_KEYS) {
+        const candidateSecret = String(connection[secretKey] || "").trim();
+        const existingSecret = String(current?.[field]?.[key]?.[secretKey] || "").trim();
+        if (candidateSecret && candidateSecret !== existingSecret) {
+          throw new Error(`Connection '${key}' contains inline '${secretKey}'. Use an environment-variable reference instead.`);
+        }
+      }
+    }
+    next[field] = connections;
+  }
+  return next;
+}
 
 function redactSecrets(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(redactSecrets);
@@ -26,6 +60,14 @@ function redactSecrets(value: unknown): unknown {
     }
   }
   return out;
+}
+
+function redactFreeformSecrets(value: string) {
+  return String(value || "")
+    .replace(/\b(password|secret|token|api[_ -]?key|supabase[_ -]?key|connection[_ -]?string)\s*[:=]\s*([^\s,;]+)/gi, "$1=[redacted]")
+    .replace(/\bBearer\s+[A-Za-z0-9._~-]+/gi, "Bearer [redacted]")
+    .replace(/\beyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{10,}(?:\.[A-Za-z0-9_-]{10,})?/g, "[redacted-jwt]")
+    .replace(/\bsk-[A-Za-z0-9_-]{16,}/g, "[redacted-key]");
 }
 
 function diagnoseConfig(config: AnyRecord) {
@@ -95,7 +137,7 @@ function validWorkflowDraft(candidate: unknown, current: AnyRecord) {
 }
 
 function normalizeCopilotResult(result: CopilotResult, current: AnyRecord): CopilotResult {
-  const allowedKinds = new Set(["question", "diagnosis", "workflow_draft", "new_client_draft", "guidance"]);
+  const allowedKinds = new Set(["question", "diagnosis", "workflow_draft", "config_draft", "new_client_draft", "guidance"]);
   if (!allowedKinds.has(result.kind)) result.kind = "guidance";
   result.questions = Array.isArray(result.questions) ? result.questions.map(String).slice(0, 5) : [];
   result.change_summary = Array.isArray(result.change_summary) ? result.change_summary.map(String).slice(0, 20) : [];
@@ -104,6 +146,10 @@ function normalizeCopilotResult(result: CopilotResult, current: AnyRecord): Copi
     result.proposed_config = validWorkflowDraft(result.proposed_config, current);
     if (!result.proposed_config) throw new Error("The generated workflow draft failed structural validation.");
     result.reply = "I have prepared a workflow draft. Nothing has been saved or deployed. Review the summary, apply it to the editor, then use Save when you are satisfied.";
+  } else if (result.kind === "config_draft") {
+    result.proposed_config = validConnectionDraft(result.proposed_config, current);
+    if (!result.proposed_config) throw new Error("The generated connection draft failed structural validation.");
+    result.reply = "I have prepared a connection draft. No credentials were stored and nothing has been saved. Review the summary, apply it to the editor, then use Save.";
   } else {
     result.proposed_config = null;
   }
@@ -176,9 +222,11 @@ async function callAzureCopilot(args: {
   const system = `You are the Workflow Manager Copilot for a deterministic voice customer-service platform.
 Return JSON only. Never include secrets. Never claim a change is live.
 Your result must have: kind, reply, questions, proposed_config, client_draft, change_summary.
-kind is one of question, diagnosis, workflow_draft, new_client_draft, guidance.
+kind is one of question, diagnosis, workflow_draft, config_draft, new_client_draft, guidance.
 Ask concise follow-up questions when business requirements are missing. Ask no more than 5 at once.
 For workflow_draft, return the COMPLETE updated client config in proposed_config. Preserve unrelated configuration exactly.
+For config_draft, return the COMPLETE updated client config in proposed_config and preserve unrelated configuration exactly. Use it when asked to add or edit database_connections or knowledge_base_connections.
+For a database connection, ask for a connection key, type, host or URL, port, database, username, SSL mode and the ENVIRONMENT VARIABLE NAME holding the secret as applicable. For Supabase REST, ask for supabase_url and supabase_key_env. Never request, repeat, return, or store an actual password, API key, token, or secret. Never set password, supabase_key, api_key, or connection_string. If the user supplies a secret, tell them to put it in the deployment environment and ask only for its variable name.
 Workflow shape: workflows.<intent>.nodes[] and edges[]. Nodes have id, type, data, position. Prompt/input nodes use data.promptKey and optional captureVariable. Action nodes use data.actionType/actionConfig. Every promptKey must exist in prompts. Every edge endpoint must exist. Add the intent to intents.
 For a new client, conduct discovery before returning new_client_draft. Do not infer missing business behavior. Ask up to 5 related questions at a time and adapt later questions to earlier answers.
 Discovery sequence:
@@ -190,7 +238,7 @@ Discovery sequence:
 For clothing retail, specifically distinguish product/style/size guidance, catalogue information, live stock by store/size/colour, store details, order placement, delivery/order status, returns/exchanges and promotions. Ask which are required; do not assume all of them.
 Only return new_client_draft once discovery is sufficient. It MUST contain intents and intent_requirements keyed by normalized intent. Every intent requirement must contain non-empty caller_requests[], information_to_collect[] (use ["none"] when appropriate), agent_actions[], data_sources[] (use ["none"] when appropriate), mode (informational, transactional or both), completion_outcome, escalation, and out_of_scope. It may also contain requirements_summary, integration_requirements and scope_guardrails.
 For diagnosis, explain concrete faults and repairs using the supplied deterministic diagnostics.
-Do not modify phone routing, credentials, database credentials, authentication, or users.`;
+Do not modify phone routing, inline credentials, authentication, or users.`;
 
   const context = {
     selected: { industry: args.industry, client: args.client, workflow: args.selectedWorkflowKey },
@@ -199,7 +247,7 @@ Do not modify phone routing, credentials, database credentials, authentication, 
   };
   const recent = args.conversation.slice(-10).map((item) => ({
     role: item.role === "assistant" ? "assistant" : "user",
-    content: String(item.text || "").slice(0, 4000),
+    content: redactFreeformSecrets(String(item.text || "")).slice(0, 4000),
   }));
   const response = await fetch(
     `${endpoint}/openai/deployments/${encodeURIComponent(deployment)}/chat/completions?api-version=2024-02-01`,
@@ -210,7 +258,7 @@ Do not modify phone routing, credentials, database credentials, authentication, 
         messages: [
           { role: "system", content: system },
           ...recent,
-          { role: "user", content: `${args.message}\n\nCURRENT_CONTEXT:\n${JSON.stringify(context).slice(0, 60000)}` },
+          { role: "user", content: `${redactFreeformSecrets(args.message)}\n\nCURRENT_CONTEXT:\n${JSON.stringify(context).slice(0, 60000)}` },
         ],
         temperature: 0.1,
         response_format: { type: "json_object" },
