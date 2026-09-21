@@ -15,8 +15,11 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Voice Agent Dashboard",
-  description: "Configure your Voice Agent Workflows",
+  title: {
+    default: "Tellio | Voice agents that get things done",
+    template: "%s | Tellio",
+  },
+  description: "Build and operate dependable AI voice agents around your workflows, knowledge and business systems.",
 };
 
 export default function RootLayout({
