@@ -1,368 +1,1986 @@
 {
-  "client_id": "autonova",
-  "brand_name": "AutoNova",
-  "assistant_name": "Nova",
-  "agent_name": "Nova",
-  "opening_hours": "Monday to Saturday, 8am to 6pm",
-  "brand_phone": "01234 567890",
-  "tone": "friendly, concise, helpful",
-  "voice_name": "en-GB-LibbyNeural",
-  "elevenlabs_voice_id": "MzqUf1HbJ8UmQ0wUsx2p",
-  "language": "en-GB",
-  "industry": "automotive",
-  "intents": [
-    "warranty",
-    "service",
-    "sales",
-    "finance",
-    "general"
-  ],
-  "warranty_period_months": 6,
-  "enable_warranty": true,
-  "enable_sales": false,
-  "enable_service": true,
-  "enable_finance": false,
-  "booking_config": {
-    "notification_email": "pauldkelly@outlook.com",
-    "email_subject_prefix": "New Service Booking:"
-  },
-  "warranty_completion": {
-    "mode": "handoff",
-    "target_intent": "service",
-    "transition_message": "I've captured all the details. I'll now hand you over to our servicing team to get this booked in."
-  },
-  "intent_routing_rules": {
-    "warranty": {
-      "keywords": [
-        "problem",
-        "issue",
-        "fault",
-        "broken",
-        "not working",
-        "noise",
-        "rattle"
-      ],
-      "enabled": true
-    },
-    "service": {
-      "keywords": [
-        "service",
-        "servicing",
-        "maintenance"
-      ],
-      "enabled": true
-    },
-    "sales": {
-      "keywords": [
-        "buy",
-        "purchase",
-        "test drive"
-      ],
-      "enabled": false
-    },
-    "finance": {
-      "keywords": [
-        "finance",
-        "loan",
-        "monthly payment"
-      ],
-      "enabled": false
-    },
-    "general": {
-      "keywords": [],
-      "enabled": true
-    },
-    "priority": [
-      "warranty",
-      "service",
-      "sales",
-      "finance",
-      "general"
-    ],
-    "fallback_to_llm": true
-  },
-  "prompts": {
-    "service_ask_issue": "Could you describe the problem you're experiencing?",
-    "service_ask_name": "Could I take your full name for the booking?",
-    "service_ask_phone": "Could you please provide the best telephone number to contact you on?",
-    "service_ask_postcode": "Could you tell me the postcode for the address?",
-    "service_ask_house_number": "Thanks. What's the house number or name?",
-    "service_confirm_address": "Thanks. I have the address as: {address}. Is that correct?",
-    "system_greeting": "Hi, I’m {assistant} with {brand}. Before we get into the details, can I take your name?",
-    "ask_intent_with_name": "How can I help you today, {name}?",
-    "ask_intent_retry_giveup": "How can I help you today?",
-    "ask_name_retry": "Sorry, I didn't catch your name. Could you say it again?",
-    "intent_fallback": "Sorry, I didn’t quite catch that. How can I help you today?",
-    "warranty_valid_ask_issue": "Thanks. It looks like the vehicle is within the warranty period. Could you describe the issue you're experiencing?",
-    "warranty_ask_purchase_date": "Do you know roughly when the vehicle was purchased?",
-    "warranty_expired_redirect": "Thanks for that. It looks like the vehicle is outside the manufacturer warranty. You may want to contact an independent garage. Is there anything else?",
-    "warranty_expired_capture": "Thanks for that. Although the vehicle is outside warranty, I can still take some details. Could you describe the issue?"
-  },
-  "workflows": {
-    "warranty": {
-      "nodes": [
-        {
-          "id": "1",
-          "type": "input",
-          "data": {
-            "label": "Start Warranty Check"
-          },
-          "position": {
-            "x": 250,
-            "y": 0
-          },
-          "width": 150,
-          "height": 39
-        },
-        {
-          "id": "2",
-          "data": {
-            "label": "Check Purchase Date",
-            "promptKey": "warranty_ask_purchase_date"
-          },
-          "position": {
-            "x": 250,
-            "y": 100
-          },
-          "width": 150,
-          "height": 39
-        },
-        {
-          "id": "3",
-          "data": {
-            "label": "Calculate Status"
-          },
-          "position": {
-            "x": 250,
-            "y": 200
-          },
-          "width": 150,
-          "height": 39
-        },
-        {
-          "id": "4",
-          "data": {
-            "label": "In Warranty: Ask Issue",
-            "promptKey": "warranty_valid_ask_issue"
-          },
-          "position": {
-            "x": 100,
-            "y": 300
-          },
-          "width": 150,
-          "height": 39
-        },
-        {
-          "id": "5",
-          "data": {
-            "label": "Out of Warranty: Redirect",
-            "promptKey": "warranty_expired_redirect"
-          },
-          "position": {
-            "x": 400,
-            "y": 300
-          },
-          "width": 150,
-          "height": 57,
-          "selected": false,
-          "dragging": false
-        },
-        {
-          "id": "handoff_service",
-          "type": "handoff",
-          "data": {
-            "label": "Handoff to Service",
-            "targetWorkflow": "service"
-          },
-          "position": {
-            "x": 100,
-            "y": 400
-          },
-          "width": 218,
-          "height": 67
-        }
-      ],
-      "edges": [
-        {
-          "id": "e1-2",
-          "source": "1",
-          "target": "2"
-        },
-        {
-          "id": "e2-3",
-          "source": "2",
-          "target": "3"
-        },
-        {
-          "id": "e3-4",
-          "source": "3",
-          "target": "4",
-          "label": "< 6 months"
-        },
-        {
-          "id": "e3-5",
-          "source": "3",
-          "target": "5",
-          "label": "> 6 months"
-        },
-        {
-          "id": "e4-handoff",
-          "source": "4",
-          "target": "handoff_service"
-        }
-      ]
-    },
-    "service": {
-      "nodes": [
-        {
-          "id": "s1",
-          "type": "input",
-          "data": {
-            "label": "Start Service Booking",
-            "promptKey": "ask_intent_with_name"
-          },
-          "position": {
-            "x": 250,
-            "y": 0
-          }
-        },
-        {
-          "id": "s2",
-          "data": {
-            "label": "Ask Issue",
-            "promptKey": "service_ask_issue"
-          },
-          "position": {
-            "x": 250,
-            "y": 100
-          }
-        },
-        {
-          "id": "s3",
-          "data": {
-            "label": "Ask Name",
-            "promptKey": "service_ask_name"
-          },
-          "position": {
-            "x": 250,
-            "y": 200
-          }
-        },
-        {
-          "id": "s4",
-          "data": {
-            "label": "Ask Phone",
-            "promptKey": "service_ask_phone"
-          },
-          "position": {
-            "x": 250,
-            "y": 300
-          }
-        },
-        {
-          "id": "s5",
-          "data": {
-            "label": "Ask Postcode",
-            "promptKey": "service_ask_postcode"
-          },
-          "position": {
-            "x": 250,
-            "y": 400
-          }
-        },
-        {
-          "id": "s6",
-          "data": {
-            "label": "Lookup Address (Client DB or Online)"
-          },
-          "position": {
-            "x": 250,
-            "y": 500
-          }
-        },
-        {
-          "id": "s7",
-          "data": {
-            "label": "Ask House Number/Name",
-            "promptKey": "service_ask_house_number"
-          },
-          "position": {
-            "x": 250,
-            "y": 600
-          }
-        },
-        {
-          "id": "s8",
-          "data": {
-            "label": "Confirm Address",
-            "promptKey": "service_confirm_address"
-          },
-          "position": {
-            "x": 250,
-            "y": 700
-          }
-        },
-        {
-          "id": "s9",
-          "data": {
-            "label": "Send Email & Hangup"
-          },
-          "position": {
-            "x": 250,
-            "y": 800
-          }
-        }
-      ],
-      "edges": [
-        {
-          "id": "es1-2",
-          "source": "s1",
-          "target": "s2"
-        },
-        {
-          "id": "es2-3",
-          "source": "s2",
-          "target": "s3"
-        },
-        {
-          "id": "es3-4",
-          "source": "s3",
-          "target": "s4"
-        },
-        {
-          "id": "es4-5",
-          "source": "s4",
-          "target": "s5"
-        },
-        {
-          "id": "es5-6",
-          "source": "s5",
-          "target": "s6",
-          "label": "Lookup available"
-        },
-        {
-          "id": "es5-7",
-          "source": "s5",
-          "target": "s7",
-          "label": "No lookup available"
-        },
-        {
-          "id": "es6-7",
-          "source": "s6",
-          "target": "s7",
-          "label": "Select address or provide house number"
-        },
-        {
-          "id": "es7-8",
-          "source": "s7",
-          "target": "s8"
-        },
-        {
-          "id": "es8-9",
-          "source": "s8",
-          "target": "s9"
-        }
-      ]
-    }
-  }
+    "client_id":  "autonova",
+    "brand_name":  "AutoNova",
+    "assistant_name":  "Nova",
+    "agent_name":  "Nova",
+    "opening_hours":  "Monday to Saturday, 8am to 6pm",
+    "brand_phone":  "01234 567890",
+    "tone":  "friendly, concise, helpful",
+    "voice_name":  "en-GB-LibbyNeural",
+    "elevenlabs_voice_id":  "MzqUf1HbJ8UmQ0wUsx2p",
+    "language":  "en-GB",
+    "industry":  "automotive",
+    "workflow_mode":  "deterministic",
+    "warranty_period_months":  6,
+    "enable_warranty":  true,
+    "enable_sales":  true,
+    "enable_service":  true,
+    "enable_finance":  true,
+    "booking_config":  {
+                           "notification_email":  "pauldkelly@outlook.com",
+                           "email_subject_prefix":  "New AutoNova Booking:"
+                       },
+    "intents":  [
+                    "first_response",
+                    "breakdown_and_emergency_support",
+                    "warranty_and_repairs",
+                    "general",
+                    "new_car_order_tracking",
+                    "parts_and_accessories",
+                    "service_appointment_booking",
+                    "test_drive_booking",
+                    "finance_queries",
+                    "vehicle_sales_enquiry"
+                ],
+    "default_intent":  "first_response",
+    "intent_routing_rules":  {
+                                 "priority":  [
+                                                  "breakdown_and_emergency_support",
+                                                  "service_appointment_booking",
+                                                  "warranty_and_repairs",
+                                                  "finance_queries",
+                                                  "new_car_order_tracking",
+                                                  "parts_and_accessories",
+                                                  "test_drive_booking",
+                                                  "vehicle_sales_enquiry",
+                                                  "general"
+                                              ],
+                                 "fallback_to_llm":  true,
+                                 "first_response":  {
+                                                        "enabled":  false,
+                                                        "keywords":  [
+
+                                                                     ]
+                                                    },
+                                 "breakdown_and_emergency_support":  {
+                                                                         "enabled":  true,
+                                                                         "keywords":  [
+                                                                                          "breakdown",
+                                                                                          "roadside",
+                                                                                          "recovery",
+                                                                                          "stranded",
+                                                                                          "flat battery",
+                                                                                          "won\u0027t start",
+                                                                                          "engine failure",
+                                                                                          "accident",
+                                                                                          "emergency"
+                                                                                      ]
+                                                                     },
+                                 "service_appointment_booking":  {
+                                                                     "enabled":  true,
+                                                                     "keywords":  [
+                                                                                      "service",
+                                                                                      "servicing",
+                                                                                      "book service",
+                                                                                      "service booking",
+                                                                                      "maintenance",
+                                                                                      "interim service",
+                                                                                      "full service",
+                                                                                      "MOT",
+                                                                                      "inspection"
+                                                                                  ]
+                                                                 },
+                                 "warranty_and_repairs":  {
+                                                              "enabled":  true,
+                                                              "keywords":  [
+                                                                               "warranty",
+                                                                               "under warranty",
+                                                                               "repair",
+                                                                               "repairs",
+                                                                               "fault",
+                                                                               "issue",
+                                                                               "problem",
+                                                                               "warning light",
+                                                                               "not working"
+                                                                           ]
+                                                          },
+                                 "finance_queries":  {
+                                                         "enabled":  true,
+                                                         "keywords":  [
+                                                                          "finance",
+                                                                          "pcp",
+                                                                          "hp",
+                                                                          "lease",
+                                                                          "agreement",
+                                                                          "settlement",
+                                                                          "payment",
+                                                                          "instalment",
+                                                                          "direct debit",
+                                                                          "arrears"
+                                                                      ]
+                                                     },
+                                 "new_car_order_tracking":  {
+                                                                "enabled":  true,
+                                                                "keywords":  [
+                                                                                 "order",
+                                                                                 "order status",
+                                                                                 "order tracking",
+                                                                                 "delivery",
+                                                                                 "build status",
+                                                                                 "production",
+                                                                                 "eta",
+                                                                                 "when will it arrive"
+                                                                             ]
+                                                            },
+                                 "parts_and_accessories":  {
+                                                               "enabled":  true,
+                                                               "keywords":  [
+                                                                                "parts",
+                                                                                "part",
+                                                                                "accessories",
+                                                                                "accessory",
+                                                                                "spares",
+                                                                                "roof bars",
+                                                                                "mats",
+                                                                                "tyre",
+                                                                                "brake pads"
+                                                                            ]
+                                                           },
+                                 "test_drive_booking":  {
+                                                            "enabled":  true,
+                                                            "keywords":  [
+                                                                             "test drive",
+                                                                             "book a test drive",
+                                                                             "drive booking",
+                                                                             "trial drive"
+                                                                         ]
+                                                        },
+                                 "vehicle_sales_enquiry":  {
+                                                               "enabled":  true,
+                                                               "keywords":  [
+                                                                                "buy",
+                                                                                "purchase",
+                                                                                "new car",
+                                                                                "new vehicle",
+                                                                                "used car",
+                                                                                "approved used",
+                                                                                "options",
+                                                                                "looking at options",
+                                                                                "exploring options",
+                                                                                "new vehicle options",
+                                                                                "model",
+                                                                                "trim",
+                                                                                "price",
+                                                                                "quote",
+                                                                                "sales",
+                                                                                "availability"
+                                                                            ]
+                                                           },
+                                 "general":  {
+                                                 "enabled":  true,
+                                                 "keywords":  [
+                                                                  "opening hours",
+                                                                  "hours",
+                                                                  "location",
+                                                                  "address",
+                                                                  "contact",
+                                                                  "phone number",
+                                                                  "email",
+                                                                  "directions"
+                                                              ]
+                                             }
+                             },
+    "prompts":  {
+                    "first_response_greeting":  "Hi, I\u0027m {assistant} with {brand}. Before we get started, can I take your name?",
+                    "first_response_ask_intent":  "How can I help you today, {name}?",
+                    "ask_name_retry":  "Sorry, I didn\u0027t catch your name. Could you repeat it?",
+                    "ask_intent_retry_giveup":  "How can I help you today?",
+                    "intent_not_recognized":  "Sorry, I\u0027m not able to help with that. Is there anything else I can assist you with?",
+                    "salesEnquiry_collectInterestType":  "Are you interested in a new AutoNova, an approved used AutoNova, or would you like help exploring options?",
+                    "salesEnquiry_collectVehicleModel":  "Which AutoNova model are you looking at? For example, the 1 Series, 3 Series, X3, or i4.",
+                    "salesEnquiry_collectBudget":  "Do you have a budget or price range in mind? This helps me recommend the best options.",
+                    "salesEnquiry_clarifyRequirements":  "Here is what I have so far: you mentioned {interestType}, you're looking at {vehicleModel}, and your budget is {budget}. Have I got that right, or would you like to change anything?",
+                    "salesEnquiry_collectContactDetails":  "So we can arrange a call back from an AutoNova product specialist, may I take your preferred contact number or email?",
+                    "salesEnquiry_collectVisitTime":  "When would you like to visit the showroom? Please tell me your preferred date and time.",
+                    "salesEnquiry_leadCreated":  "Thanks I've passed your details to the sales team. An AutoNova specialist will contact you shortly.",
+                    "salesEnquiry_appointmentCreated":  "Your showroom appointment is booked. We look forward to welcoming you.",
+                    "salesEnquiry_infoOnly":  "No problem if you need anything else, I'm here to help.",
+                    "testDrive_collectVehicleModel":  "Which AutoNova model would you like to test drive?",
+                    "testDrive_collectPreferredDate":  "What date would you like to book your test drive?",
+                    "testDrive_collectPreferredTime":  "What time works best for you?",
+                    "testDrive_collectLicenceConfirmation":  "To confirm, do you hold a valid UK driving licence?",
+                    "testDrive_confirmDetails":  "Here are the details I have for your test drive: model {vehicleModel}, date {preferredDate}, time {preferredTime}, and driving licence confirmation {hasValidLicence}. Please confirm if everything looks correct.",
+                    "testDrive_success":  "Your test drive is booked. Enjoy the drive its a great way to experience the car.",
+                    "testDrive_cancelled":  "Okay, I've cancelled the booking process. Let me know if you'd like to try again.",
+                    "finance_collectTopic":  "What would you like help with today? Settlement figure, payment query, agreement details, or something else?",
+                    "finance_collectAccountIdentifier":  "Please provide your finance agreement number or registration so I can look up your details.",
+                    "finance_clarifyQuestion":  "Just to make sure I understand correctly: your finance topic is {financeTopic} and the account identifier is {financeAccountId}. Is that right?",
+                    "finance_genericAnswer":  "Here's the information related to your finance query.",
+                    "finance_settlementProvided":  "I've provided your settlement figure. If you need anything else, I'm here to help.",
+                    "finance_paymentStatusProvided":  "I've shared the latest payment status for your agreement.",
+                    "finance_genericEnd":  "Thanks for your question. Let me know if there's anything else you'd like to check.",
+                    "orderTracking_collectOrderNumber":  "Please provide your AutoNova order number so I can check the latest status.",
+                    "orderTracking_presentStatus":  "Here's the current status of your AutoNova order.",
+                    "orderTracking_followUp":  "Is there anything else you'd like to know about your order?",
+                    "orderTracking_end":  "Thanks if you need further updates, just let me know.",
+                    "parts_collectVehicleReg":  "Can I take your vehicle registration so I can check compatibility?",
+                    "parts_collectPartDescription":  "Which part or accessory are you looking for? For example, brake pads, roof bars, or floor mats.",
+                    "parts_presentOptions":  "Here are the available options for your vehicle.",
+                    "parts_collectContactDetails":  "To arrange an order or call back from the parts team, may I take your preferred contact details?",
+                    "parts_orderRequested":  "I've sent your request to the parts department. Theyll be in touch shortly.",
+                    "parts_infoOnly":  "Okay if you need anything else, feel free to ask.",
+                    "warranty_collectVehicleReg":  "Please provide your vehicle registration so I can check warranty details.",
+                    "warranty_collectIssueDescription":  "Could you briefly describe the issue you're experiencing?",
+                    "warranty_explainCoverage":  "Here's what your AutoNova warranty covers for this type of issue.",
+                    "warranty_collectPreferredDate":  "What date would you like to book your repair appointment?",
+                    "warranty_collectPreferredTime":  "What time works best for you?",
+                    "warranty_bookingCreated":  "Your repair appointment is booked. The service team will be ready for your visit.",
+                    "warranty_infoOnly":  "No problem if you need more help with warranty or repairs, I'm here.",
+                    "breakdown_collectLocation":  "Where is the vehicle located right now?",
+                    "breakdown_collectVehicleReg":  "What is the vehicle registration?",
+                    "breakdown_collectSafetyStatus":  "Is everyone safe, and is the vehicle in a safe position?",
+                    "breakdown_handoffToAssistance":  "I'm connecting you to AutoNova Roadside Assistance now.",
+                    "generalEnquiry_route":  "Let me check what you need help with.",
+                    "generalEnquiry_genericAnswer":  "Here's the information you requested.",
+                    "generalEnquiry_openingHours":  "Our opening hours are as follows.",
+                    "generalEnquiry_location":  "Here's our dealership location and directions.",
+                    "generalEnquiry_contact":  "Here are our contact details.",
+                    "generalEnquiry_genericEnd":  "Happy to help let me know if there's anything else you'd like to know.",
+                    "serviceBooking_collectVehicleReg":  "Can I take your vehicle registration to locate your service profile?",
+                    "serviceBooking_collectServiceType":  "What type of service do you need today - routine service, MOT, diagnostics, or repair?",
+                    "serviceBooking_collectPreferredDate":  "What date would you like to book your service?",
+                    "serviceBooking_collectPreferredTime":  "What time would you prefer for the appointment?",
+                    "serviceBooking_confirmDetails":  "Let me confirm your booking details: vehicle registration {vehicleReg}, service type {serviceType}, preferred date {preferredDate}, and preferred time {preferredTime}. Shall I submit this appointment?",
+                    "serviceBooking_success":  "Your service appointment has been booked successfully.",
+                    "serviceBooking_cancelled":  "No problem, I have cancelled the booking request for now."
+                },
+    "workflows":  {
+                      "breakdown_and_emergency_support":  {
+                                                              "nodes":  [
+                                                                            {
+                                                                                "id":  "start",
+                                                                                "type":  "input",
+                                                                                "data":  {
+                                                                                             "label":  "Start"
+                                                                                         },
+                                                                                "position":  {
+                                                                                                 "x":  250,
+                                                                                                 "y":  0
+                                                                                             }
+                                                                            },
+                                                                            {
+                                                                                "id":  "collect_location",
+                                                                                "type":  "custom",
+                                                                                "data":  {
+                                                                                             "label":  "collect location",
+                                                                                             "promptKey":  "breakdown_collectLocation",
+                                                                                             "captureVariable":  "breakdownLocation"
+                                                                                         },
+                                                                                "position":  {
+                                                                                                 "x":  250,
+                                                                                                 "y":  110
+                                                                                             }
+                                                                            },
+                                                                            {
+                                                                                "id":  "collect_vehicle_reg",
+                                                                                "type":  "custom",
+                                                                                "data":  {
+                                                                                             "label":  "collect vehicle reg",
+                                                                                             "promptKey":  "breakdown_collectVehicleReg",
+                                                                                             "captureVariable":  "vehicleReg"
+                                                                                         },
+                                                                                "position":  {
+                                                                                                 "x":  250,
+                                                                                                 "y":  220
+                                                                                             }
+                                                                            },
+                                                                            {
+                                                                                "id":  "collect_safety_status",
+                                                                                "type":  "custom",
+                                                                                "data":  {
+                                                                                             "label":  "collect safety status",
+                                                                                             "promptKey":  "breakdown_collectSafetyStatus",
+                                                                                             "captureVariable":  "safetyStatus"
+                                                                                         },
+                                                                                "position":  {
+                                                                                                 "x":  250,
+                                                                                                 "y":  330
+                                                                                             }
+                                                                            },
+                                                                            {
+                                                                                "id":  "function_route_to_assistance",
+                                                                                "type":  "action",
+                                                                                "data":  {
+                                                                                             "label":  "Placeholder: routeToRoadsideAssistance",
+                                                                                             "actionType":  "update_session",
+                                                                                             "actionConfig":  {
+                                                                                                                  "updates":  {
+                                                                                                                                  "placeholder_routeToRoadsideAssistance":  true,
+                                                                                                                                  "placeholder_last_function":  "routeToRoadsideAssistance"
+                                                                                                                              }
+                                                                                                              }
+                                                                                         },
+                                                                                "position":  {
+                                                                                                 "x":  250,
+                                                                                                 "y":  440
+                                                                                             }
+                                                                            },
+                                                                            {
+                                                                                "id":  "end_handoff",
+                                                                                "type":  "custom",
+                                                                                "data":  {
+                                                                                             "label":  "Complete",
+                                                                                             "promptKey":  "breakdown_handoffToAssistance"
+                                                                                         },
+                                                                                "position":  {
+                                                                                                 "x":  250,
+                                                                                                 "y":  550
+                                                                                             }
+                                                                            }
+                                                                        ],
+                                                              "edges":  [
+                                                                            {
+                                                                                "id":  "e-start-collect_location",
+                                                                                "source":  "start",
+                                                                                "target":  "collect_location"
+                                                                            },
+                                                                            {
+                                                                                "id":  "e-collect_location-collect_vehicle_reg",
+                                                                                "source":  "collect_location",
+                                                                                "target":  "collect_vehicle_reg"
+                                                                            },
+                                                                            {
+                                                                                "id":  "e-collect_vehicle_reg-collect_safety_status",
+                                                                                "source":  "collect_vehicle_reg",
+                                                                                "target":  "collect_safety_status"
+                                                                            },
+                                                                            {
+                                                                                "id":  "e-collect_safety_status-function_route_to_assistance",
+                                                                                "source":  "collect_safety_status",
+                                                                                "target":  "function_route_to_assistance"
+                                                                            },
+                                                                            {
+                                                                                "id":  "e-function_route_to_assistance-end_handoff",
+                                                                                "source":  "function_route_to_assistance",
+                                                                                "target":  "end_handoff"
+                                                                            }
+                                                                        ]
+                                                          },
+                      "warranty_and_repairs":  {
+                                                   "nodes":  [
+                                                                 {
+                                                                     "id":  "start",
+                                                                     "type":  "input",
+                                                                     "data":  {
+                                                                                  "label":  "Start"
+                                                                              },
+                                                                     "position":  {
+                                                                                      "x":  250,
+                                                                                      "y":  0
+                                                                                  }
+                                                                 },
+                                                                 {
+                                                                     "id":  "collect_vehicle_reg",
+                                                                     "type":  "custom",
+                                                                     "data":  {
+                                                                                  "label":  "collect vehicle reg",
+                                                                                  "promptKey":  "warranty_collectVehicleReg",
+                                                                                  "captureVariable":  "vehicleReg"
+                                                                              },
+                                                                     "position":  {
+                                                                                      "x":  250,
+                                                                                      "y":  110
+                                                                                  }
+                                                                 },
+                                                                 {
+                                                                     "id":  "collect_issue_description",
+                                                                     "type":  "custom",
+                                                                     "data":  {
+                                                                                  "label":  "collect issue description",
+                                                                                  "promptKey":  "warranty_collectIssueDescription",
+                                                                                  "captureVariable":  "issueDescription"
+                                                                              },
+                                                                     "position":  {
+                                                                                      "x":  250,
+                                                                                      "y":  220
+                                                                                  }
+                                                                 },
+                                                                 {
+                                                                     "id":  "function_check_warranty_status",
+                                                                     "type":  "action",
+                                                                     "data":  {
+                                                                                  "label":  "Placeholder: checkWarrantyStatus",
+                                                                                  "actionType":  "knowledge_search",
+                                                                                  "actionConfig":  {
+                                                                                                       "query_template":  "warranty status and coverage for registration {vehicleReg} issue {issueDescription}",
+                                                                                                       "top_k":  3,
+                                                                                                       "timeout_seconds":  8,
+                                                                                                       "result_var":  "kb",
+                                                                                                       "kb_scope":  "workflow",
+                                                                                                       "respond_immediately":  true,
+                                                                                                       "no_results_prompt":  "No specific answer found yet in the knowledge base. I can still help with next steps.",
+                                                                                                       "error_prompt":  "I am having trouble accessing the knowledge base right now. Let me continue and arrange follow-up."
+                                                                                                   }
+                                                                              },
+                                                                     "position":  {
+                                                                                      "x":  250,
+                                                                                      "y":  330
+                                                                                  }
+                                                                 },
+                                                                 {
+                                                                     "id":  "llm_explain_coverage",
+                                                                     "type":  "custom",
+                                                                     "data":  {
+                                                                                  "label":  "llm explain coverage",
+                                                                                  "promptKey":  "warranty_explainCoverage"
+                                                                              },
+                                                                     "position":  {
+                                                                                      "x":  250,
+                                                                                      "y":  440
+                                                                                  }
+                                                                 },
+                                                                 {
+                                                                     "id":  "condition_next_step",
+                                                                     "type":  "custom",
+                                                                     "data":  {
+                                                                                  "label":  "Decision"
+                                                                              },
+                                                                     "position":  {
+                                                                                      "x":  250,
+                                                                                      "y":  550
+                                                                                  }
+                                                                 },
+                                                                 {
+                                                                     "id":  "collect_preferred_date",
+                                                                     "type":  "custom",
+                                                                     "data":  {
+                                                                                  "label":  "collect preferred date",
+                                                                                  "promptKey":  "warranty_collectPreferredDate",
+                                                                                  "captureVariable":  "preferredDate"
+                                                                              },
+                                                                     "position":  {
+                                                                                      "x":  250,
+                                                                                      "y":  660
+                                                                                  }
+                                                                 },
+                                                                 {
+                                                                     "id":  "collect_preferred_time",
+                                                                     "type":  "custom",
+                                                                     "data":  {
+                                                                                  "label":  "collect preferred time",
+                                                                                  "promptKey":  "warranty_collectPreferredTime",
+                                                                                  "captureVariable":  "preferredTime"
+                                                                              },
+                                                                     "position":  {
+                                                                                      "x":  250,
+                                                                                      "y":  770
+                                                                                  }
+                                                                 },
+                                                                 {
+                                                                     "id":  "function_create_repair_booking",
+                                                                     "type":  "action",
+                                                                     "data":  {
+                                                                                  "label":  "Placeholder: createRepairBooking",
+                                                                                  "actionType":  "update_session",
+                                                                                  "actionConfig":  {
+                                                                                                       "updates":  {
+                                                                                                                       "placeholder_createRepairBooking":  true,
+                                                                                                                       "placeholder_last_function":  "createRepairBooking"
+                                                                                                                   }
+                                                                                                   }
+                                                                              },
+                                                                     "position":  {
+                                                                                      "x":  250,
+                                                                                      "y":  880
+                                                                                  }
+                                                                 },
+                                                                 {
+                                                                     "id":  "end_booking_created",
+                                                                     "type":  "custom",
+                                                                     "data":  {
+                                                                                  "label":  "Complete",
+                                                                                  "promptKey":  "warranty_bookingCreated"
+                                                                              },
+                                                                     "position":  {
+                                                                                      "x":  250,
+                                                                                      "y":  990
+                                                                                  }
+                                                                 },
+                                                                 {
+                                                                     "id":  "end_info_only",
+                                                                     "type":  "custom",
+                                                                     "data":  {
+                                                                                  "label":  "Complete",
+                                                                                  "promptKey":  "warranty_infoOnly"
+                                                                              },
+                                                                     "position":  {
+                                                                                      "x":  250,
+                                                                                      "y":  1100
+                                                                                  }
+                                                                 }
+                                                             ],
+                                                   "edges":  [
+                                                                 {
+                                                                     "id":  "e-start-collect_vehicle_reg",
+                                                                     "source":  "start",
+                                                                     "target":  "collect_vehicle_reg"
+                                                                 },
+                                                                 {
+                                                                     "id":  "e-collect_vehicle_reg-collect_issue_description",
+                                                                     "source":  "collect_vehicle_reg",
+                                                                     "target":  "collect_issue_description"
+                                                                 },
+                                                                 {
+                                                                     "id":  "e-collect_issue_description-function_check_warranty_status",
+                                                                     "source":  "collect_issue_description",
+                                                                     "target":  "function_check_warranty_status"
+                                                                 },
+                                                                 {
+                                                                     "id":  "e-function_check_warranty_status-llm_explain_coverage",
+                                                                     "source":  "function_check_warranty_status",
+                                                                     "target":  "llm_explain_coverage"
+                                                                 },
+                                                                 {
+                                                                     "id":  "e-llm_explain_coverage-condition_next_step",
+                                                                     "source":  "llm_explain_coverage",
+                                                                     "target":  "condition_next_step"
+                                                                 },
+                                                                 {
+                                                                     "id":  "e-condition_next_step-collect_preferred_date-userWantsRepairBooking",
+                                                                     "source":  "condition_next_step",
+                                                                     "target":  "collect_preferred_date",
+                                                                     "label":  "userWantsRepairBooking"
+                                                                 },
+                                                                 {
+                                                                     "id":  "e-condition_next_step-end_info_only-default",
+                                                                     "source":  "condition_next_step",
+                                                                     "target":  "end_info_only",
+                                                                     "label":  "default"
+                                                                 },
+                                                                 {
+                                                                     "id":  "e-collect_preferred_date-collect_preferred_time",
+                                                                     "source":  "collect_preferred_date",
+                                                                     "target":  "collect_preferred_time"
+                                                                 },
+                                                                 {
+                                                                     "id":  "e-collect_preferred_time-function_create_repair_booking",
+                                                                     "source":  "collect_preferred_time",
+                                                                     "target":  "function_create_repair_booking"
+                                                                 },
+                                                                 {
+                                                                     "id":  "e-function_create_repair_booking-end_booking_created",
+                                                                     "source":  "function_create_repair_booking",
+                                                                     "target":  "end_booking_created"
+                                                                 }
+                                                             ]
+                                               },
+                      "general":  {
+                                      "nodes":  [
+                                                    {
+                                                        "id":  "start",
+                                                        "type":  "input",
+                                                        "data":  {
+                                                                     "label":  "Start"
+                                                                 },
+                                                        "position":  {
+                                                                         "x":  250,
+                                                                         "y":  0
+                                                                     }
+                                                    },
+                                                    {
+                                                        "id":  "llm_route_general_enquiry",
+                                                        "type":  "custom",
+                                                        "data":  {
+                                                                     "label":  "llm route general enquiry",
+                                                                     "promptKey":  "generalEnquiry_route"
+                                                                 },
+                                                        "position":  {
+                                                                         "x":  250,
+                                                                         "y":  110
+                                                                     }
+                                                    },
+                                                    {
+                                                        "id":  "condition_route",
+                                                        "type":  "custom",
+                                                        "data":  {
+                                                                     "label":  "Decision"
+                                                                 },
+                                                        "position":  {
+                                                                         "x":  250,
+                                                                         "y":  220
+                                                                     }
+                                                    },
+                                                    {
+                                                        "id":  "function_get_opening_hours",
+                                                        "type":  "action",
+                                                        "data":  {
+                                                                     "label":  "Placeholder: getOpeningHours",
+                                                                     "actionType":  "knowledge_search",
+                                                                     "actionConfig":  {
+                                                                                          "query_template":  "opening hours and service hours",
+                                                                                          "top_k":  3,
+                                                                                          "timeout_seconds":  8,
+                                                                                          "result_var":  "kb",
+                                                                                          "kb_scope":  "workflow",
+                                                                                          "respond_immediately":  true,
+                                                                                          "no_results_prompt":  "No specific answer found yet in the knowledge base. I can still help with next steps.",
+                                                                                          "error_prompt":  "I am having trouble accessing the knowledge base right now. Let me continue and arrange follow-up."
+                                                                                      }
+                                                                 },
+                                                        "position":  {
+                                                                         "x":  250,
+                                                                         "y":  330
+                                                                     }
+                                                    },
+                                                    {
+                                                        "id":  "function_get_location_info",
+                                                        "type":  "action",
+                                                        "data":  {
+                                                                     "label":  "Placeholder: getLocationInfo",
+                                                                     "actionType":  "knowledge_search",
+                                                                     "actionConfig":  {
+                                                                                          "query_template":  "dealership location address directions parking",
+                                                                                          "top_k":  3,
+                                                                                          "timeout_seconds":  8,
+                                                                                          "result_var":  "kb",
+                                                                                          "kb_scope":  "workflow",
+                                                                                          "respond_immediately":  true,
+                                                                                          "no_results_prompt":  "No specific answer found yet in the knowledge base. I can still help with next steps.",
+                                                                                          "error_prompt":  "I am having trouble accessing the knowledge base right now. Let me continue and arrange follow-up."
+                                                                                      }
+                                                                 },
+                                                        "position":  {
+                                                                         "x":  250,
+                                                                         "y":  440
+                                                                     }
+                                                    },
+                                                    {
+                                                        "id":  "function_get_contact_info",
+                                                        "type":  "action",
+                                                        "data":  {
+                                                                     "label":  "Placeholder: getContactInfo",
+                                                                     "actionType":  "knowledge_search",
+                                                                     "actionConfig":  {
+                                                                                          "query_template":  "dealership contact phone email departments",
+                                                                                          "top_k":  3,
+                                                                                          "timeout_seconds":  8,
+                                                                                          "result_var":  "kb",
+                                                                                          "kb_scope":  "workflow",
+                                                                                          "respond_immediately":  true,
+                                                                                          "no_results_prompt":  "No specific answer found yet in the knowledge base. I can still help with next steps.",
+                                                                                          "error_prompt":  "I am having trouble accessing the knowledge base right now. Let me continue and arrange follow-up."
+                                                                                      }
+                                                                 },
+                                                        "position":  {
+                                                                         "x":  250,
+                                                                         "y":  550
+                                                                     }
+                                                    },
+                                                    {
+                                                        "id":  "llm_generic_answer",
+                                                        "type":  "custom",
+                                                        "data":  {
+                                                                     "label":  "llm generic answer",
+                                                                     "promptKey":  "generalEnquiry_genericAnswer"
+                                                                 },
+                                                        "position":  {
+                                                                         "x":  250,
+                                                                         "y":  660
+                                                                     }
+                                                    },
+                                                    {
+                                                        "id":  "end_opening_hours",
+                                                        "type":  "custom",
+                                                        "data":  {
+                                                                     "label":  "Complete",
+                                                                     "promptKey":  "generalEnquiry_openingHours"
+                                                                 },
+                                                        "position":  {
+                                                                         "x":  250,
+                                                                         "y":  770
+                                                                     }
+                                                    },
+                                                    {
+                                                        "id":  "end_location",
+                                                        "type":  "custom",
+                                                        "data":  {
+                                                                     "label":  "Complete",
+                                                                     "promptKey":  "generalEnquiry_location"
+                                                                 },
+                                                        "position":  {
+                                                                         "x":  250,
+                                                                         "y":  880
+                                                                     }
+                                                    },
+                                                    {
+                                                        "id":  "end_contact",
+                                                        "type":  "custom",
+                                                        "data":  {
+                                                                     "label":  "Complete",
+                                                                     "promptKey":  "generalEnquiry_contact"
+                                                                 },
+                                                        "position":  {
+                                                                         "x":  250,
+                                                                         "y":  990
+                                                                     }
+                                                    },
+                                                    {
+                                                        "id":  "end_generic",
+                                                        "type":  "custom",
+                                                        "data":  {
+                                                                     "label":  "Complete",
+                                                                     "promptKey":  "generalEnquiry_genericEnd"
+                                                                 },
+                                                        "position":  {
+                                                                         "x":  250,
+                                                                         "y":  1100
+                                                                     }
+                                                    }
+                                                ],
+                                      "edges":  [
+                                                    {
+                                                        "id":  "e-start-llm_route_general_enquiry",
+                                                        "source":  "start",
+                                                        "target":  "llm_route_general_enquiry"
+                                                    },
+                                                    {
+                                                        "id":  "e-llm_route_general_enquiry-condition_route",
+                                                        "source":  "llm_route_general_enquiry",
+                                                        "target":  "condition_route"
+                                                    },
+                                                    {
+                                                        "id":  "e-condition_route-function_get_opening_hours-topicIsOpeningHours",
+                                                        "source":  "condition_route",
+                                                        "target":  "function_get_opening_hours",
+                                                        "label":  "topicIsOpeningHours"
+                                                    },
+                                                    {
+                                                        "id":  "e-condition_route-function_get_location_info-topicIsLocation",
+                                                        "source":  "condition_route",
+                                                        "target":  "function_get_location_info",
+                                                        "label":  "topicIsLocation"
+                                                    },
+                                                    {
+                                                        "id":  "e-condition_route-function_get_contact_info-topicIsContact",
+                                                        "source":  "condition_route",
+                                                        "target":  "function_get_contact_info",
+                                                        "label":  "topicIsContact"
+                                                    },
+                                                    {
+                                                        "id":  "e-condition_route-llm_generic_answer-default",
+                                                        "source":  "condition_route",
+                                                        "target":  "llm_generic_answer",
+                                                        "label":  "default"
+                                                    },
+                                                    {
+                                                        "id":  "e-function_get_opening_hours-end_opening_hours",
+                                                        "source":  "function_get_opening_hours",
+                                                        "target":  "end_opening_hours"
+                                                    },
+                                                    {
+                                                        "id":  "e-function_get_location_info-end_location",
+                                                        "source":  "function_get_location_info",
+                                                        "target":  "end_location"
+                                                    },
+                                                    {
+                                                        "id":  "e-function_get_contact_info-end_contact",
+                                                        "source":  "function_get_contact_info",
+                                                        "target":  "end_contact"
+                                                    },
+                                                    {
+                                                        "id":  "e-llm_generic_answer-end_generic",
+                                                        "source":  "llm_generic_answer",
+                                                        "target":  "end_generic"
+                                                    }
+                                                ]
+                                  },
+                      "new_car_order_tracking":  {
+                                                     "nodes":  [
+                                                                   {
+                                                                       "id":  "start",
+                                                                       "type":  "input",
+                                                                       "data":  {
+                                                                                    "label":  "Start"
+                                                                                },
+                                                                       "position":  {
+                                                                                        "x":  250,
+                                                                                        "y":  0
+                                                                                    }
+                                                                   },
+                                                                   {
+                                                                       "id":  "collect_order_number",
+                                                                       "type":  "custom",
+                                                                       "data":  {
+                                                                                    "label":  "collect order number",
+                                                                                    "promptKey":  "orderTracking_collectOrderNumber",
+                                                                                    "captureVariable":  "orderNumber"
+                                                                                },
+                                                                       "position":  {
+                                                                                        "x":  250,
+                                                                                        "y":  110
+                                                                                    }
+                                                                   },
+                                                                   {
+                                                                       "id":  "function_get_order_status",
+                                                                       "type":  "action",
+                                                                       "data":  {
+                                                                                    "label":  "Placeholder: getNewCarOrderStatus",
+                                                                                    "actionType":  "knowledge_search",
+                                                                                    "actionConfig":  {
+                                                                                                         "query_template":  "order status update for order number {orderNumber}",
+                                                                                                         "top_k":  3,
+                                                                                                         "timeout_seconds":  8,
+                                                                                                         "result_var":  "kb",
+                                                                                                         "kb_scope":  "workflow",
+                                                                                                         "respond_immediately":  true,
+                                                                                                         "no_results_prompt":  "No specific answer found yet in the knowledge base. I can still help with next steps.",
+                                                                                                         "error_prompt":  "I am having trouble accessing the knowledge base right now. Let me continue and arrange follow-up."
+                                                                                                     }
+                                                                                },
+                                                                       "position":  {
+                                                                                        "x":  250,
+                                                                                        "y":  220
+                                                                                    }
+                                                                   },
+                                                                   {
+                                                                       "id":  "llm_present_status",
+                                                                       "type":  "custom",
+                                                                       "data":  {
+                                                                                    "label":  "llm present status",
+                                                                                    "promptKey":  "orderTracking_presentStatus"
+                                                                                },
+                                                                       "position":  {
+                                                                                        "x":  250,
+                                                                                        "y":  330
+                                                                                    }
+                                                                   },
+                                                                   {
+                                                                       "id":  "condition_follow_up",
+                                                                       "type":  "custom",
+                                                                       "data":  {
+                                                                                    "label":  "Decision"
+                                                                                },
+                                                                       "position":  {
+                                                                                        "x":  250,
+                                                                                        "y":  440
+                                                                                    }
+                                                                   },
+                                                                   {
+                                                                       "id":  "llm_handle_follow_up",
+                                                                       "type":  "custom",
+                                                                       "data":  {
+                                                                                    "label":  "llm handle follow up",
+                                                                                    "promptKey":  "orderTracking_followUp"
+                                                                                },
+                                                                       "position":  {
+                                                                                        "x":  250,
+                                                                                        "y":  550
+                                                                                    }
+                                                                   },
+                                                                   {
+                                                                       "id":  "end_done",
+                                                                       "type":  "custom",
+                                                                       "data":  {
+                                                                                    "label":  "Complete",
+                                                                                    "promptKey":  "orderTracking_end"
+                                                                                },
+                                                                       "position":  {
+                                                                                        "x":  250,
+                                                                                        "y":  660
+                                                                                    }
+                                                                   }
+                                                               ],
+                                                     "edges":  [
+                                                                   {
+                                                                       "id":  "e-start-collect_order_number",
+                                                                       "source":  "start",
+                                                                       "target":  "collect_order_number"
+                                                                   },
+                                                                   {
+                                                                       "id":  "e-collect_order_number-function_get_order_status",
+                                                                       "source":  "collect_order_number",
+                                                                       "target":  "function_get_order_status"
+                                                                   },
+                                                                   {
+                                                                       "id":  "e-function_get_order_status-llm_present_status",
+                                                                       "source":  "function_get_order_status",
+                                                                       "target":  "llm_present_status"
+                                                                   },
+                                                                   {
+                                                                       "id":  "e-llm_present_status-condition_follow_up",
+                                                                       "source":  "llm_present_status",
+                                                                       "target":  "condition_follow_up"
+                                                                   },
+                                                                   {
+                                                                       "id":  "e-condition_follow_up-llm_handle_follow_up-userHasMoreQuestions",
+                                                                       "source":  "condition_follow_up",
+                                                                       "target":  "llm_handle_follow_up",
+                                                                       "label":  "userHasMoreQuestions"
+                                                                   },
+                                                                   {
+                                                                       "id":  "e-condition_follow_up-end_done-default",
+                                                                       "source":  "condition_follow_up",
+                                                                       "target":  "end_done",
+                                                                       "label":  "default"
+                                                                   },
+                                                                   {
+                                                                       "id":  "e-llm_handle_follow_up-end_done",
+                                                                       "source":  "llm_handle_follow_up",
+                                                                       "target":  "end_done"
+                                                                   }
+                                                               ]
+                                                 },
+                      "parts_and_accessories":  {
+                                                    "nodes":  [
+                                                                  {
+                                                                      "id":  "start",
+                                                                      "type":  "input",
+                                                                      "data":  {
+                                                                                   "label":  "Start"
+                                                                               },
+                                                                      "position":  {
+                                                                                       "x":  250,
+                                                                                       "y":  0
+                                                                                   }
+                                                                  },
+                                                                  {
+                                                                      "id":  "collect_vehicle_reg",
+                                                                      "type":  "custom",
+                                                                      "data":  {
+                                                                                   "label":  "collect vehicle reg",
+                                                                                   "promptKey":  "parts_collectVehicleReg",
+                                                                                   "captureVariable":  "vehicleReg"
+                                                                               },
+                                                                      "position":  {
+                                                                                       "x":  250,
+                                                                                       "y":  110
+                                                                                   }
+                                                                  },
+                                                                  {
+                                                                      "id":  "collect_part_description",
+                                                                      "type":  "custom",
+                                                                      "data":  {
+                                                                                   "label":  "collect part description",
+                                                                                   "promptKey":  "parts_collectPartDescription",
+                                                                                   "captureVariable":  "partDescription"
+                                                                               },
+                                                                      "position":  {
+                                                                                       "x":  250,
+                                                                                       "y":  220
+                                                                                   }
+                                                                  },
+                                                                  {
+                                                                      "id":  "function_check_part_availability",
+                                                                      "type":  "action",
+                                                                      "data":  {
+                                                                                   "label":  "Placeholder: checkPartAvailability",
+                                                                                   "actionType":  "knowledge_search",
+                                                                                   "actionConfig":  {
+                                                                                                        "query_template":  "parts availability for registration {vehicleReg} part {partDescription}",
+                                                                                                        "top_k":  3,
+                                                                                                        "timeout_seconds":  8,
+                                                                                                        "result_var":  "kb",
+                                                                                                        "kb_scope":  "workflow",
+                                                                                                        "respond_immediately":  true,
+                                                                                                        "no_results_prompt":  "No specific answer found yet in the knowledge base. I can still help with next steps.",
+                                                                                                        "error_prompt":  "I am having trouble accessing the knowledge base right now. Let me continue and arrange follow-up."
+                                                                                                    }
+                                                                               },
+                                                                      "position":  {
+                                                                                       "x":  250,
+                                                                                       "y":  330
+                                                                                   }
+                                                                  },
+                                                                  {
+                                                                      "id":  "llm_present_part_options",
+                                                                      "type":  "custom",
+                                                                      "data":  {
+                                                                                   "label":  "llm present part options",
+                                                                                   "promptKey":  "parts_presentOptions"
+                                                                               },
+                                                                      "position":  {
+                                                                                       "x":  250,
+                                                                                       "y":  440
+                                                                                   }
+                                                                  },
+                                                                  {
+                                                                      "id":  "condition_user_action",
+                                                                      "type":  "custom",
+                                                                      "data":  {
+                                                                                   "label":  "Decision"
+                                                                               },
+                                                                      "position":  {
+                                                                                       "x":  250,
+                                                                                       "y":  550
+                                                                                   }
+                                                                  },
+                                                                  {
+                                                                      "id":  "collect_contact_details",
+                                                                      "type":  "custom",
+                                                                      "data":  {
+                                                                                   "label":  "collect contact details",
+                                                                                   "promptKey":  "parts_collectContactDetails",
+                                                                                   "captureVariable":  "contactDetails"
+                                                                               },
+                                                                      "position":  {
+                                                                                       "x":  250,
+                                                                                       "y":  660
+                                                                                   }
+                                                                  },
+                                                                  {
+                                                                      "id":  "function_create_parts_order_request",
+                                                                      "type":  "action",
+                                                                      "data":  {
+                                                                                   "label":  "Placeholder: createPartsOrderRequest",
+                                                                                   "actionType":  "update_session",
+                                                                                   "actionConfig":  {
+                                                                                                        "updates":  {
+                                                                                                                        "placeholder_createPartsOrderRequest":  true,
+                                                                                                                        "placeholder_last_function":  "createPartsOrderRequest"
+                                                                                                                    }
+                                                                                                    }
+                                                                               },
+                                                                      "position":  {
+                                                                                       "x":  250,
+                                                                                       "y":  770
+                                                                                   }
+                                                                  },
+                                                                  {
+                                                                      "id":  "end_order_requested",
+                                                                      "type":  "custom",
+                                                                      "data":  {
+                                                                                   "label":  "Complete",
+                                                                                   "promptKey":  "parts_orderRequested"
+                                                                               },
+                                                                      "position":  {
+                                                                                       "x":  250,
+                                                                                       "y":  880
+                                                                                   }
+                                                                  },
+                                                                  {
+                                                                      "id":  "end_info_only",
+                                                                      "type":  "custom",
+                                                                      "data":  {
+                                                                                   "label":  "Complete",
+                                                                                   "promptKey":  "parts_infoOnly"
+                                                                               },
+                                                                      "position":  {
+                                                                                       "x":  250,
+                                                                                       "y":  990
+                                                                                   }
+                                                                  }
+                                                              ],
+                                                    "edges":  [
+                                                                  {
+                                                                      "id":  "e-start-collect_vehicle_reg",
+                                                                      "source":  "start",
+                                                                      "target":  "collect_vehicle_reg"
+                                                                  },
+                                                                  {
+                                                                      "id":  "e-collect_vehicle_reg-collect_part_description",
+                                                                      "source":  "collect_vehicle_reg",
+                                                                      "target":  "collect_part_description"
+                                                                  },
+                                                                  {
+                                                                      "id":  "e-collect_part_description-function_check_part_availability",
+                                                                      "source":  "collect_part_description",
+                                                                      "target":  "function_check_part_availability"
+                                                                  },
+                                                                  {
+                                                                      "id":  "e-function_check_part_availability-llm_present_part_options",
+                                                                      "source":  "function_check_part_availability",
+                                                                      "target":  "llm_present_part_options"
+                                                                  },
+                                                                  {
+                                                                      "id":  "e-llm_present_part_options-condition_user_action",
+                                                                      "source":  "llm_present_part_options",
+                                                                      "target":  "condition_user_action"
+                                                                  },
+                                                                  {
+                                                                      "id":  "e-condition_user_action-collect_contact_details-userWantsToOrder",
+                                                                      "source":  "condition_user_action",
+                                                                      "target":  "collect_contact_details",
+                                                                      "label":  "userWantsToOrder"
+                                                                  },
+                                                                  {
+                                                                      "id":  "e-condition_user_action-end_info_only-default",
+                                                                      "source":  "condition_user_action",
+                                                                      "target":  "end_info_only",
+                                                                      "label":  "default"
+                                                                  },
+                                                                  {
+                                                                      "id":  "e-collect_contact_details-function_create_parts_order_request",
+                                                                      "source":  "collect_contact_details",
+                                                                      "target":  "function_create_parts_order_request"
+                                                                  },
+                                                                  {
+                                                                      "id":  "e-function_create_parts_order_request-end_order_requested",
+                                                                      "source":  "function_create_parts_order_request",
+                                                                      "target":  "end_order_requested"
+                                                                  }
+                                                              ]
+                                                },
+                      "service_appointment_booking":  {
+                                                          "nodes":  [
+                                                                        {
+                                                                            "id":  "start",
+                                                                            "type":  "input",
+                                                                            "data":  {
+                                                                                         "label":  "Start"
+                                                                                     },
+                                                                            "position":  {
+                                                                                             "x":  250,
+                                                                                             "y":  0
+                                                                                         }
+                                                                        },
+                                                                        {
+                                                                            "id":  "collect_vehicle_reg",
+                                                                            "type":  "custom",
+                                                                            "data":  {
+                                                                                         "label":  "collect vehicle reg",
+                                                                                         "promptKey":  "serviceBooking_collectVehicleReg",
+                                                                                         "captureVariable":  "vehicleReg"
+                                                                                     },
+                                                                            "position":  {
+                                                                                             "x":  250,
+                                                                                             "y":  110
+                                                                                         }
+                                                                        },
+                                                                        {
+                                                                            "id":  "collect_service_type",
+                                                                            "type":  "custom",
+                                                                            "data":  {
+                                                                                         "label":  "collect service type",
+                                                                                         "promptKey":  "serviceBooking_collectServiceType",
+                                                                                         "captureVariable":  "serviceType"
+                                                                                     },
+                                                                            "position":  {
+                                                                                             "x":  250,
+                                                                                             "y":  220
+                                                                                         }
+                                                                        },
+                                                                        {
+                                                                            "id":  "collect_preferred_date",
+                                                                            "type":  "custom",
+                                                                            "data":  {
+                                                                                         "label":  "collect preferred date",
+                                                                                         "promptKey":  "serviceBooking_collectPreferredDate",
+                                                                                         "captureVariable":  "preferredDate"
+                                                                                     },
+                                                                            "position":  {
+                                                                                             "x":  250,
+                                                                                             "y":  330
+                                                                                         }
+                                                                        },
+                                                                        {
+                                                                            "id":  "collect_preferred_time",
+                                                                            "type":  "custom",
+                                                                            "data":  {
+                                                                                         "label":  "collect preferred time",
+                                                                                         "promptKey":  "serviceBooking_collectPreferredTime",
+                                                                                         "captureVariable":  "preferredTime"
+                                                                                     },
+                                                                            "position":  {
+                                                                                             "x":  250,
+                                                                                             "y":  440
+                                                                                         }
+                                                                        },
+                                                                        {
+                                                                            "id":  "llm_confirm_details",
+                                                                            "type":  "custom",
+                                                                            "data":  {
+                                                                                         "label":  "llm confirm details",
+                                                                                         "promptKey":  "serviceBooking_confirmDetails"
+                                                                                     },
+                                                                            "position":  {
+                                                                                             "x":  250,
+                                                                                             "y":  550
+                                                                                         }
+                                                                        },
+                                                                        {
+                                                                            "id":  "condition_user_confirmation",
+                                                                            "type":  "custom",
+                                                                            "data":  {
+                                                                                         "label":  "Decision"
+                                                                                     },
+                                                                            "position":  {
+                                                                                             "x":  250,
+                                                                                             "y":  660
+                                                                                         }
+                                                                        },
+                                                                        {
+                                                                            "id":  "function_create_booking",
+                                                                            "type":  "action",
+                                                                            "data":  {
+                                                                                         "label":  "Placeholder: createServiceBooking",
+                                                                                         "actionType":  "update_session",
+                                                                                         "actionConfig":  {
+                                                                                                              "updates":  {
+                                                                                                                              "placeholder_createServiceBooking":  true,
+                                                                                                                              "placeholder_last_function":  "createServiceBooking"
+                                                                                                                          }
+                                                                                                          }
+                                                                                     },
+                                                                            "position":  {
+                                                                                             "x":  250,
+                                                                                             "y":  770
+                                                                                         }
+                                                                        },
+                                                                        {
+                                                                            "id":  "end_success",
+                                                                            "type":  "custom",
+                                                                            "data":  {
+                                                                                         "label":  "Complete",
+                                                                                         "promptKey":  "serviceBooking_success"
+                                                                                     },
+                                                                            "position":  {
+                                                                                             "x":  250,
+                                                                                             "y":  880
+                                                                                         }
+                                                                        },
+                                                                        {
+                                                                            "id":  "end_cancelled",
+                                                                            "type":  "custom",
+                                                                            "data":  {
+                                                                                         "label":  "Complete",
+                                                                                         "promptKey":  "serviceBooking_cancelled"
+                                                                                     },
+                                                                            "position":  {
+                                                                                             "x":  250,
+                                                                                             "y":  990
+                                                                                         }
+                                                                        }
+                                                                    ],
+                                                          "edges":  [
+                                                                        {
+                                                                            "id":  "e-start-collect_vehicle_reg",
+                                                                            "source":  "start",
+                                                                            "target":  "collect_vehicle_reg"
+                                                                        },
+                                                                        {
+                                                                            "id":  "e-collect_vehicle_reg-collect_service_type",
+                                                                            "source":  "collect_vehicle_reg",
+                                                                            "target":  "collect_service_type"
+                                                                        },
+                                                                        {
+                                                                            "id":  "e-collect_service_type-collect_preferred_date",
+                                                                            "source":  "collect_service_type",
+                                                                            "target":  "collect_preferred_date"
+                                                                        },
+                                                                        {
+                                                                            "id":  "e-collect_preferred_date-collect_preferred_time",
+                                                                            "source":  "collect_preferred_date",
+                                                                            "target":  "collect_preferred_time"
+                                                                        },
+                                                                        {
+                                                                            "id":  "e-collect_preferred_time-llm_confirm_details",
+                                                                            "source":  "collect_preferred_time",
+                                                                            "target":  "llm_confirm_details"
+                                                                        },
+                                                                        {
+                                                                            "id":  "e-llm_confirm_details-condition_user_confirmation",
+                                                                            "source":  "llm_confirm_details",
+                                                                            "target":  "condition_user_confirmation"
+                                                                        },
+                                                                        {
+                                                                            "id":  "e-condition_user_confirmation-function_create_booking-userConfirmed",
+                                                                            "source":  "condition_user_confirmation",
+                                                                            "target":  "function_create_booking",
+                                                                            "label":  "userConfirmed"
+                                                                        },
+                                                                        {
+                                                                            "id":  "e-condition_user_confirmation-end_cancelled-default",
+                                                                            "source":  "condition_user_confirmation",
+                                                                            "target":  "end_cancelled",
+                                                                            "label":  "default"
+                                                                        },
+                                                                        {
+                                                                            "id":  "e-function_create_booking-end_success",
+                                                                            "source":  "function_create_booking",
+                                                                            "target":  "end_success"
+                                                                        }
+                                                                    ]
+                                                      },
+                      "test_drive_booking":  {
+                                                 "nodes":  [
+                                                               {
+                                                                   "id":  "start",
+                                                                   "type":  "input",
+                                                                   "data":  {
+                                                                                "label":  "Start"
+                                                                            },
+                                                                   "position":  {
+                                                                                    "x":  250,
+                                                                                    "y":  0
+                                                                                }
+                                                               },
+                                                               {
+                                                                   "id":  "collect_vehicle_model",
+                                                                   "type":  "custom",
+                                                                   "data":  {
+                                                                                "label":  "collect vehicle model",
+                                                                                "promptKey":  "testDrive_collectVehicleModel",
+                                                                                "captureVariable":  "vehicleModel"
+                                                                            },
+                                                                   "position":  {
+                                                                                    "x":  250,
+                                                                                    "y":  110
+                                                                                }
+                                                               },
+                                                               {
+                                                                   "id":  "collect_preferred_date",
+                                                                   "type":  "custom",
+                                                                   "data":  {
+                                                                                "label":  "collect preferred date",
+                                                                                "promptKey":  "testDrive_collectPreferredDate",
+                                                                                "captureVariable":  "preferredDate"
+                                                                            },
+                                                                   "position":  {
+                                                                                    "x":  250,
+                                                                                    "y":  220
+                                                                                }
+                                                               },
+                                                               {
+                                                                   "id":  "collect_preferred_time",
+                                                                   "type":  "custom",
+                                                                   "data":  {
+                                                                                "label":  "collect preferred time",
+                                                                                "promptKey":  "testDrive_collectPreferredTime",
+                                                                                "captureVariable":  "preferredTime"
+                                                                            },
+                                                                   "position":  {
+                                                                                    "x":  250,
+                                                                                    "y":  330
+                                                                                }
+                                                               },
+                                                               {
+                                                                   "id":  "collect_licence_confirmation",
+                                                                   "type":  "custom",
+                                                                   "data":  {
+                                                                                "label":  "collect licence confirmation",
+                                                                                "promptKey":  "testDrive_collectLicenceConfirmation",
+                                                                                "captureVariable":  "hasValidLicence"
+                                                                            },
+                                                                   "position":  {
+                                                                                    "x":  250,
+                                                                                    "y":  440
+                                                                                }
+                                                               },
+                                                               {
+                                                                   "id":  "llm_confirm_details",
+                                                                   "type":  "custom",
+                                                                   "data":  {
+                                                                                "label":  "llm confirm details",
+                                                                                "promptKey":  "testDrive_confirmDetails"
+                                                                            },
+                                                                   "position":  {
+                                                                                    "x":  250,
+                                                                                    "y":  550
+                                                                                }
+                                                               },
+                                                               {
+                                                                   "id":  "condition_user_confirmation",
+                                                                   "type":  "custom",
+                                                                   "data":  {
+                                                                                "label":  "Decision"
+                                                                            },
+                                                                   "position":  {
+                                                                                    "x":  250,
+                                                                                    "y":  660
+                                                                                }
+                                                               },
+                                                               {
+                                                                   "id":  "function_create_test_drive_booking",
+                                                                   "type":  "action",
+                                                                   "data":  {
+                                                                                "label":  "Placeholder: createTestDriveBooking",
+                                                                                "actionType":  "update_session",
+                                                                                "actionConfig":  {
+                                                                                                     "updates":  {
+                                                                                                                     "placeholder_createTestDriveBooking":  true,
+                                                                                                                     "placeholder_last_function":  "createTestDriveBooking"
+                                                                                                                 }
+                                                                                                 }
+                                                                            },
+                                                                   "position":  {
+                                                                                    "x":  250,
+                                                                                    "y":  770
+                                                                                }
+                                                               },
+                                                               {
+                                                                   "id":  "end_success",
+                                                                   "type":  "custom",
+                                                                   "data":  {
+                                                                                "label":  "Complete",
+                                                                                "promptKey":  "testDrive_success"
+                                                                            },
+                                                                   "position":  {
+                                                                                    "x":  250,
+                                                                                    "y":  880
+                                                                                }
+                                                               },
+                                                               {
+                                                                   "id":  "end_cancelled",
+                                                                   "type":  "custom",
+                                                                   "data":  {
+                                                                                "label":  "Complete",
+                                                                                "promptKey":  "testDrive_cancelled"
+                                                                            },
+                                                                   "position":  {
+                                                                                    "x":  250,
+                                                                                    "y":  990
+                                                                                }
+                                                               }
+                                                           ],
+                                                 "edges":  [
+                                                               {
+                                                                   "id":  "e-start-collect_vehicle_model",
+                                                                   "source":  "start",
+                                                                   "target":  "collect_vehicle_model"
+                                                               },
+                                                               {
+                                                                   "id":  "e-collect_vehicle_model-collect_preferred_date",
+                                                                   "source":  "collect_vehicle_model",
+                                                                   "target":  "collect_preferred_date"
+                                                               },
+                                                               {
+                                                                   "id":  "e-collect_preferred_date-collect_preferred_time",
+                                                                   "source":  "collect_preferred_date",
+                                                                   "target":  "collect_preferred_time"
+                                                               },
+                                                               {
+                                                                   "id":  "e-collect_preferred_time-collect_licence_confirmation",
+                                                                   "source":  "collect_preferred_time",
+                                                                   "target":  "collect_licence_confirmation"
+                                                               },
+                                                               {
+                                                                   "id":  "e-collect_licence_confirmation-llm_confirm_details",
+                                                                   "source":  "collect_licence_confirmation",
+                                                                   "target":  "llm_confirm_details"
+                                                               },
+                                                               {
+                                                                   "id":  "e-llm_confirm_details-condition_user_confirmation",
+                                                                   "source":  "llm_confirm_details",
+                                                                   "target":  "condition_user_confirmation"
+                                                               },
+                                                               {
+                                                                   "id":  "e-condition_user_confirmation-function_create_test_drive_booking-userConfirmed",
+                                                                   "source":  "condition_user_confirmation",
+                                                                   "target":  "function_create_test_drive_booking",
+                                                                   "label":  "userConfirmed"
+                                                               },
+                                                               {
+                                                                   "id":  "e-condition_user_confirmation-end_cancelled-default",
+                                                                   "source":  "condition_user_confirmation",
+                                                                   "target":  "end_cancelled",
+                                                                   "label":  "default"
+                                                               },
+                                                               {
+                                                                   "id":  "e-function_create_test_drive_booking-end_success",
+                                                                   "source":  "function_create_test_drive_booking",
+                                                                   "target":  "end_success"
+                                                               }
+                                                           ]
+                                             },
+                      "finance_queries":  {
+                                              "nodes":  [
+                                                            {
+                                                                "id":  "start",
+                                                                "type":  "input",
+                                                                "data":  {
+                                                                             "label":  "Start"
+                                                                         },
+                                                                "position":  {
+                                                                                 "x":  250,
+                                                                                 "y":  0
+                                                                             }
+                                                            },
+                                                            {
+                                                                "id":  "collect_finance_topic",
+                                                                "type":  "custom",
+                                                                "data":  {
+                                                                             "label":  "collect finance topic",
+                                                                             "promptKey":  "finance_collectTopic",
+                                                                             "captureVariable":  "financeTopic"
+                                                                         },
+                                                                "position":  {
+                                                                                 "x":  250,
+                                                                                 "y":  110
+                                                                             }
+                                                            },
+                                                            {
+                                                                "id":  "collect_account_identifier",
+                                                                "type":  "custom",
+                                                                "data":  {
+                                                                             "label":  "collect account identifier",
+                                                                             "promptKey":  "finance_collectAccountIdentifier",
+                                                                             "captureVariable":  "financeAccountId"
+                                                                         },
+                                                                "position":  {
+                                                                                 "x":  250,
+                                                                                 "y":  220
+                                                                             }
+                                                            },
+                                                            {
+                                                                "id":  "llm_clarify_question",
+                                                                "type":  "custom",
+                                                                "data":  {
+                                                                             "label":  "llm clarify question",
+                                                                             "promptKey":  "finance_clarifyQuestion"
+                                                                         },
+                                                                "position":  {
+                                                                                 "x":  250,
+                                                                                 "y":  330
+                                                                             }
+                                                            },
+                                                            {
+                                                                "id":  "condition_route",
+                                                                "type":  "custom",
+                                                                "data":  {
+                                                                             "label":  "Decision"
+                                                                         },
+                                                                "position":  {
+                                                                                 "x":  250,
+                                                                                 "y":  440
+                                                                             }
+                                                            },
+                                                            {
+                                                                "id":  "function_get_settlement_figure",
+                                                                "type":  "action",
+                                                                "data":  {
+                                                                             "label":  "Placeholder: getSettlementFigure",
+                                                                             "actionType":  "knowledge_search",
+                                                                             "actionConfig":  {
+                                                                                                  "query_template":  "finance settlement guidance for account {financeAccountId}",
+                                                                                                  "top_k":  3,
+                                                                                                  "timeout_seconds":  8,
+                                                                                                  "result_var":  "kb",
+                                                                                                  "kb_scope":  "workflow",
+                                                                                                  "respond_immediately":  true,
+                                                                                                  "no_results_prompt":  "No specific answer found yet in the knowledge base. I can still help with next steps.",
+                                                                                                  "error_prompt":  "I am having trouble accessing the knowledge base right now. Let me continue and arrange follow-up."
+                                                                                              }
+                                                                         },
+                                                                "position":  {
+                                                                                 "x":  250,
+                                                                                 "y":  550
+                                                                             }
+                                                            },
+                                                            {
+                                                                "id":  "function_get_payment_status",
+                                                                "type":  "action",
+                                                                "data":  {
+                                                                             "label":  "Placeholder: getPaymentStatus",
+                                                                             "actionType":  "knowledge_search",
+                                                                             "actionConfig":  {
+                                                                                                  "query_template":  "finance payment status guidance for account {financeAccountId}",
+                                                                                                  "top_k":  3,
+                                                                                                  "timeout_seconds":  8,
+                                                                                                  "result_var":  "kb",
+                                                                                                  "kb_scope":  "workflow",
+                                                                                                  "respond_immediately":  true,
+                                                                                                  "no_results_prompt":  "No specific answer found yet in the knowledge base. I can still help with next steps.",
+                                                                                                  "error_prompt":  "I am having trouble accessing the knowledge base right now. Let me continue and arrange follow-up."
+                                                                                              }
+                                                                         },
+                                                                "position":  {
+                                                                                 "x":  250,
+                                                                                 "y":  660
+                                                                             }
+                                                            },
+                                                            {
+                                                                "id":  "llm_generic_finance_answer",
+                                                                "type":  "custom",
+                                                                "data":  {
+                                                                             "label":  "llm generic finance answer",
+                                                                             "promptKey":  "finance_genericAnswer"
+                                                                         },
+                                                                "position":  {
+                                                                                 "x":  250,
+                                                                                 "y":  770
+                                                                             }
+                                                            },
+                                                            {
+                                                                "id":  "end_settlement",
+                                                                "type":  "custom",
+                                                                "data":  {
+                                                                             "label":  "Complete",
+                                                                             "promptKey":  "finance_settlementProvided"
+                                                                         },
+                                                                "position":  {
+                                                                                 "x":  250,
+                                                                                 "y":  880
+                                                                             }
+                                                            },
+                                                            {
+                                                                "id":  "end_payment_status",
+                                                                "type":  "custom",
+                                                                "data":  {
+                                                                             "label":  "Complete",
+                                                                             "promptKey":  "finance_paymentStatusProvided"
+                                                                         },
+                                                                "position":  {
+                                                                                 "x":  250,
+                                                                                 "y":  990
+                                                                             }
+                                                            },
+                                                            {
+                                                                "id":  "end_generic",
+                                                                "type":  "custom",
+                                                                "data":  {
+                                                                             "label":  "Complete",
+                                                                             "promptKey":  "finance_genericEnd"
+                                                                         },
+                                                                "position":  {
+                                                                                 "x":  250,
+                                                                                 "y":  1100
+                                                                             }
+                                                            }
+                                                        ],
+                                              "edges":  [
+                                                            {
+                                                                "id":  "e-start-collect_finance_topic",
+                                                                "source":  "start",
+                                                                "target":  "collect_finance_topic"
+                                                            },
+                                                            {
+                                                                "id":  "e-collect_finance_topic-collect_account_identifier",
+                                                                "source":  "collect_finance_topic",
+                                                                "target":  "collect_account_identifier"
+                                                            },
+                                                            {
+                                                                "id":  "e-collect_account_identifier-llm_clarify_question",
+                                                                "source":  "collect_account_identifier",
+                                                                "target":  "llm_clarify_question"
+                                                            },
+                                                            {
+                                                                "id":  "e-llm_clarify_question-condition_route",
+                                                                "source":  "llm_clarify_question",
+                                                                "target":  "condition_route"
+                                                            },
+                                                            {
+                                                                "id":  "e-condition_route-function_get_settlement_figure-topicIsSettlement",
+                                                                "source":  "condition_route",
+                                                                "target":  "function_get_settlement_figure",
+                                                                "label":  "topicIsSettlement"
+                                                            },
+                                                            {
+                                                                "id":  "e-condition_route-function_get_payment_status-topicIsPaymentIssue",
+                                                                "source":  "condition_route",
+                                                                "target":  "function_get_payment_status",
+                                                                "label":  "topicIsPaymentIssue"
+                                                            },
+                                                            {
+                                                                "id":  "e-condition_route-llm_generic_finance_answer-default",
+                                                                "source":  "condition_route",
+                                                                "target":  "llm_generic_finance_answer",
+                                                                "label":  "default"
+                                                            },
+                                                            {
+                                                                "id":  "e-function_get_settlement_figure-end_settlement",
+                                                                "source":  "function_get_settlement_figure",
+                                                                "target":  "end_settlement"
+                                                            },
+                                                            {
+                                                                "id":  "e-function_get_payment_status-end_payment_status",
+                                                                "source":  "function_get_payment_status",
+                                                                "target":  "end_payment_status"
+                                                            },
+                                                            {
+                                                                "id":  "e-llm_generic_finance_answer-end_generic",
+                                                                "source":  "llm_generic_finance_answer",
+                                                                "target":  "end_generic"
+                                                            }
+                                                        ]
+                                          },
+                      "vehicle_sales_enquiry":  {
+                                                    "nodes":  [
+                                                                  {
+                                                                      "id":  "start",
+                                                                      "type":  "input",
+                                                                      "data":  {
+                                                                                   "label":  "Start"
+                                                                               },
+                                                                      "position":  {
+                                                                                       "x":  250,
+                                                                                       "y":  0
+                                                                                   }
+                                                                  },
+                                                                  {
+                                                                      "id":  "collect_interest_type",
+                                                                      "type":  "custom",
+                                                                      "data":  {
+                                                                                   "label":  "collect interest type",
+                                                                                   "promptKey":  "salesEnquiry_collectInterestType",
+                                                                                   "captureVariable":  "interestType"
+                                                                               },
+                                                                      "position":  {
+                                                                                       "x":  250,
+                                                                                       "y":  110
+                                                                                   }
+                                                                  },
+                                                                  {
+                                                                      "id":  "collect_vehicle_model",
+                                                                      "type":  "custom",
+                                                                      "data":  {
+                                                                                   "label":  "collect vehicle model",
+                                                                                   "promptKey":  "salesEnquiry_collectVehicleModel",
+                                                                                   "captureVariable":  "vehicleModel"
+                                                                               },
+                                                                      "position":  {
+                                                                                       "x":  250,
+                                                                                       "y":  220
+                                                                                   }
+                                                                  },
+                                                                  {
+                                                                      "id":  "collect_budget",
+                                                                      "type":  "custom",
+                                                                      "data":  {
+                                                                                   "label":  "collect budget",
+                                                                                   "promptKey":  "salesEnquiry_collectBudget",
+                                                                                   "captureVariable":  "budget"
+                                                                               },
+                                                                      "position":  {
+                                                                                       "x":  250,
+                                                                                       "y":  330
+                                                                                   }
+                                                                  },
+                                                                  {
+                                                                      "id":  "llm_clarify_requirements",
+                                                                      "type":  "custom",
+                                                                      "data":  {
+                                                                                   "label":  "llm clarify requirements",
+                                                                                   "promptKey":  "salesEnquiry_clarifyRequirements"
+                                                                               },
+                                                                      "position":  {
+                                                                                       "x":  250,
+                                                                                       "y":  440
+                                                                                   }
+                                                                  },
+                                                                  {
+                                                                      "id":  "condition_route",
+                                                                      "type":  "custom",
+                                                                      "data":  {
+                                                                                   "label":  "Decision"
+                                                                               },
+                                                                      "position":  {
+                                                                                       "x":  250,
+                                                                                       "y":  550
+                                                                                   }
+                                                                  },
+                                                                  {
+                                                                      "id":  "collect_contact_details",
+                                                                      "type":  "custom",
+                                                                      "data":  {
+                                                                                   "label":  "collect contact details",
+                                                                                   "promptKey":  "salesEnquiry_collectContactDetails",
+                                                                                   "captureVariable":  "contactDetails"
+                                                                               },
+                                                                      "position":  {
+                                                                                       "x":  250,
+                                                                                       "y":  660
+                                                                                   }
+                                                                  },
+                                                                  {
+                                                                      "id":  "collect_visit_time",
+                                                                      "type":  "custom",
+                                                                      "data":  {
+                                                                                   "label":  "collect visit time",
+                                                                                   "promptKey":  "salesEnquiry_collectVisitTime",
+                                                                                   "captureVariable":  "preferredVisitTime"
+                                                                               },
+                                                                      "position":  {
+                                                                                       "x":  250,
+                                                                                       "y":  770
+                                                                                   }
+                                                                  },
+                                                                  {
+                                                                      "id":  "function_create_sales_lead",
+                                                                      "type":  "action",
+                                                                      "data":  {
+                                                                                   "label":  "Placeholder: createSalesLead",
+                                                                                   "actionType":  "update_session",
+                                                                                   "actionConfig":  {
+                                                                                                        "updates":  {
+                                                                                                                        "placeholder_createSalesLead":  true,
+                                                                                                                        "placeholder_last_function":  "createSalesLead"
+                                                                                                                    }
+                                                                                                    }
+                                                                               },
+                                                                      "position":  {
+                                                                                       "x":  250,
+                                                                                       "y":  880
+                                                                                   }
+                                                                  },
+                                                                  {
+                                                                      "id":  "function_create_showroom_appointment",
+                                                                      "type":  "action",
+                                                                      "data":  {
+                                                                                   "label":  "Placeholder: createShowroomAppointment",
+                                                                                   "actionType":  "update_session",
+                                                                                   "actionConfig":  {
+                                                                                                        "updates":  {
+                                                                                                                        "placeholder_createShowroomAppointment":  true,
+                                                                                                                        "placeholder_last_function":  "createShowroomAppointment"
+                                                                                                                    }
+                                                                                                    }
+                                                                               },
+                                                                      "position":  {
+                                                                                       "x":  250,
+                                                                                       "y":  990
+                                                                                   }
+                                                                  },
+                                                                  {
+                                                                      "id":  "end_lead_created",
+                                                                      "type":  "custom",
+                                                                      "data":  {
+                                                                                   "label":  "Complete",
+                                                                                   "promptKey":  "salesEnquiry_leadCreated"
+                                                                               },
+                                                                      "position":  {
+                                                                                       "x":  250,
+                                                                                       "y":  1100
+                                                                                   }
+                                                                  },
+                                                                  {
+                                                                      "id":  "end_appointment_created",
+                                                                      "type":  "custom",
+                                                                      "data":  {
+                                                                                   "label":  "Complete",
+                                                                                   "promptKey":  "salesEnquiry_appointmentCreated"
+                                                                               },
+                                                                      "position":  {
+                                                                                       "x":  250,
+                                                                                       "y":  1210
+                                                                                   }
+                                                                  },
+                                                                  {
+                                                                      "id":  "end_info_only",
+                                                                      "type":  "custom",
+                                                                      "data":  {
+                                                                                   "label":  "Complete",
+                                                                                   "promptKey":  "salesEnquiry_infoOnly"
+                                                                               },
+                                                                      "position":  {
+                                                                                       "x":  250,
+                                                                                       "y":  1320
+                                                                                   }
+                                                                  }
+                                                              ],
+                                                    "edges":  [
+                                                                  {
+                                                                      "id":  "e-start-collect_interest_type",
+                                                                      "source":  "start",
+                                                                      "target":  "collect_interest_type"
+                                                                  },
+                                                                  {
+                                                                      "id":  "e-collect_interest_type-collect_vehicle_model",
+                                                                      "source":  "collect_interest_type",
+                                                                      "target":  "collect_vehicle_model"
+                                                                  },
+                                                                  {
+                                                                      "id":  "e-collect_vehicle_model-collect_budget",
+                                                                      "source":  "collect_vehicle_model",
+                                                                      "target":  "collect_budget"
+                                                                  },
+                                                                  {
+                                                                      "id":  "e-collect_budget-llm_clarify_requirements",
+                                                                      "source":  "collect_budget",
+                                                                      "target":  "llm_clarify_requirements"
+                                                                  },
+                                                                  {
+                                                                      "id":  "e-llm_clarify_requirements-condition_route",
+                                                                      "source":  "llm_clarify_requirements",
+                                                                      "target":  "condition_route"
+                                                                  },
+                                                                  {
+                                                                      "id":  "e-condition_route-collect_contact_details-userWantsCallback",
+                                                                      "source":  "condition_route",
+                                                                      "target":  "collect_contact_details",
+                                                                      "label":  "userWantsCallback"
+                                                                  },
+                                                                  {
+                                                                      "id":  "e-condition_route-collect_visit_time-userWantsVisit",
+                                                                      "source":  "condition_route",
+                                                                      "target":  "collect_visit_time",
+                                                                      "label":  "userWantsVisit"
+                                                                  },
+                                                                  {
+                                                                      "id":  "e-condition_route-end_info_only-default",
+                                                                      "source":  "condition_route",
+                                                                      "target":  "end_info_only",
+                                                                      "label":  "default"
+                                                                  },
+                                                                  {
+                                                                      "id":  "e-collect_contact_details-function_create_sales_lead",
+                                                                      "source":  "collect_contact_details",
+                                                                      "target":  "function_create_sales_lead"
+                                                                  },
+                                                                  {
+                                                                      "id":  "e-collect_visit_time-function_create_showroom_appointment",
+                                                                      "source":  "collect_visit_time",
+                                                                      "target":  "function_create_showroom_appointment"
+                                                                  },
+                                                                  {
+                                                                      "id":  "e-function_create_sales_lead-end_lead_created",
+                                                                      "source":  "function_create_sales_lead",
+                                                                      "target":  "end_lead_created"
+                                                                  },
+                                                                  {
+                                                                      "id":  "e-function_create_showroom_appointment-end_appointment_created",
+                                                                      "source":  "function_create_showroom_appointment",
+                                                                      "target":  "end_appointment_created"
+                                                                  }
+                                                              ]
+                                                },
+                      "first_response":  {
+                                             "nodes":  [
+                                                           {
+                                                               "id":  "fr1",
+                                                               "type":  "input",
+                                                               "data":  {
+                                                                            "label":  "Greeting \u0026 Name",
+                                                                            "promptKey":  "first_response_greeting",
+                                                                            "captureVariable":  "customer_name"
+                                                                        },
+                                                               "position":  {
+                                                                                "x":  250,
+                                                                                "y":  0
+                                                                            }
+                                                           },
+                                                           {
+                                                               "id":  "fr2",
+                                                               "type":  "custom",
+                                                               "data":  {
+                                                                            "label":  "Ask Intent",
+                                                                            "promptKey":  "first_response_ask_intent"
+                                                                        },
+                                                               "position":  {
+                                                                                "x":  250,
+                                                                                "y":  110
+                                                                            }
+                                                           },
+                                                           {
+                                                               "id":  "fr3",
+                                                               "type":  "action",
+                                                               "data":  {
+                                                                            "label":  "Detect Intent",
+                                                                            "actionType":  "detect_intent"
+                                                                        },
+                                                               "position":  {
+                                                                                "x":  250,
+                                                                                "y":  220
+                                                                            }
+                                                           }
+                                                       ],
+                                             "edges":  [
+                                                           {
+                                                               "id":  "efr1-2",
+                                                               "source":  "fr1",
+                                                               "target":  "fr2"
+                                                           },
+                                                           {
+                                                               "id":  "efr2-3",
+                                                               "source":  "fr2",
+                                                               "target":  "fr3"
+                                                           }
+                                                       ]
+                                         }
+                  },
+    "knowledge_base_behavior":  {
+                                    "include_general":  true,
+                                    "scope_mode":  "workflow",
+                                    "default_connection_ref":  "Test_KB"
+                                },
+    "knowledge_base_default_connection":  "Test_KB"
 }
