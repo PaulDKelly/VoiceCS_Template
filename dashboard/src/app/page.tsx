@@ -31,6 +31,10 @@ type NewClientDraft = {
   azure_voice_name: string;
   intents_csv: string;
   default_intent: string;
+  requirements_summary: string;
+  intent_requirements: Record<string, any>;
+  integration_requirements: Record<string, any>;
+  scope_guardrails: Record<string, any>;
 };
 type CreateClientMode = "industry_template" | "blank";
 type NewClientVoiceEntry = {
@@ -145,6 +149,10 @@ export default function Home() {
     azure_voice_name: "",
     intents_csv: "",
     default_intent: "first_response",
+    requirements_summary: "",
+    intent_requirements: {},
+    integration_requirements: {},
+    scope_guardrails: {},
   });
   const [createClientMode, setCreateClientMode] = useState<CreateClientMode>("industry_template");
   const [createClientTemplateSource, setCreateClientTemplateSource] = useState<string>("");
@@ -635,6 +643,10 @@ export default function Home() {
       azure_voice_name: "",
       intents_csv: "",
       default_intent: "first_response",
+      requirements_summary: "",
+      intent_requirements: {},
+      integration_requirements: {},
+      scope_guardrails: {},
     });
     setCreateClientMode("industry_template");
     setCreateClientTemplateSource("");
@@ -670,6 +682,16 @@ export default function Home() {
       azure_voice_name: String(draft.azure_voice_name || ""),
       intents_csv: intents,
       default_intent: String(draft.default_intent || "first_response"),
+      requirements_summary: String(draft.requirements_summary || ""),
+      intent_requirements: draft.intent_requirements && typeof draft.intent_requirements === "object"
+        ? draft.intent_requirements
+        : {},
+      integration_requirements: draft.integration_requirements && typeof draft.integration_requirements === "object"
+        ? draft.integration_requirements
+        : {},
+      scope_guardrails: draft.scope_guardrails && typeof draft.scope_guardrails === "object"
+        ? draft.scope_guardrails
+        : {},
     });
     setCreateClientMode("industry_template");
     setCreateClientTemplateSource("");
@@ -738,6 +760,18 @@ export default function Home() {
       }
       if (newClientDraft.tone.trim()) content.tone = newClientDraft.tone.trim();
       if (intents.length) content.intents = Array.from(new Set(["first_response", ...intents]));
+      if (newClientDraft.requirements_summary.trim()) {
+        content.requirements_summary = newClientDraft.requirements_summary.trim();
+      }
+      if (Object.keys(newClientDraft.intent_requirements).length) {
+        content.intent_requirements = newClientDraft.intent_requirements;
+      }
+      if (Object.keys(newClientDraft.integration_requirements).length) {
+        content.integration_requirements = newClientDraft.integration_requirements;
+      }
+      if (Object.keys(newClientDraft.scope_guardrails).length) {
+        content.scope_guardrails = newClientDraft.scope_guardrails;
+      }
 
       const defaultIntent = normalizeIntent(newClientDraft.default_intent);
       if (defaultIntent) content.default_intent = defaultIntent;
@@ -2304,6 +2338,20 @@ export default function Home() {
                     />
                   </div>
                 </div>
+
+                {(newClientDraft.requirements_summary || Object.keys(newClientDraft.intent_requirements).length > 0) && (
+                  <div className="border border-gray-700 bg-gray-900 p-3 rounded">
+                    <div className="text-xs font-medium text-gray-300 mb-2">Discovery Brief</div>
+                    {newClientDraft.requirements_summary && (
+                      <div className="text-xs text-gray-400 mb-2 whitespace-pre-wrap">
+                        {newClientDraft.requirements_summary}
+                      </div>
+                    )}
+                    <pre className="max-h-44 overflow-auto whitespace-pre-wrap text-[11px] text-gray-400">
+                      {JSON.stringify(newClientDraft.intent_requirements, null, 2)}
+                    </pre>
+                  </div>
+                )}
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>

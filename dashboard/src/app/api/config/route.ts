@@ -1224,6 +1224,16 @@ export async function POST(req: NextRequest) {
                         initialContent.intents = Array.from(next);
                     }
                 }
+
+                for (const field of ["intent_requirements", "integration_requirements", "scope_guardrails"]) {
+                    const value = requestedContent[field];
+                    if (value && typeof value === "object" && !Array.isArray(value)) {
+                        initialContent[field] = cloneDeep(value);
+                    }
+                }
+                if (String(requestedContent.requirements_summary || "").trim()) {
+                    initialContent.requirements_summary = String(requestedContent.requirements_summary).trim();
+                }
             }
 
             // Ensure selected intents have workflows from global template library.

@@ -112,14 +112,40 @@ function normalizeCopilotResult(result: CopilotResult, current: AnyRecord): Copi
     const draft = result.client_draft && typeof result.client_draft === "object" ? result.client_draft : null;
     const clientName = String(draft?.client_name || draft?.client_id || "").trim();
     const industry = String(draft?.industry || "").trim();
-    if (!draft || !clientName || !industry) {
+    const assistantName = String(draft?.assistant_name || "").trim();
+    const tone = String(draft?.tone || "").trim();
+    const intents = Array.isArray(draft?.intents)
+      ? draft.intents.map((value: unknown) => normalizeIntentName(String(value || ""))).filter((value: string) => value && value !== "first_response")
+      : [];
+    const intentRequirements = draft?.intent_requirements && typeof draft.intent_requirements === "object"
+      ? draft.intent_requirements as AnyRecord
+      : {};
+    const incompleteIntents = intents.filter((intent: string) => {
+      const detail = intentRequirements[intent];
+      return !detail
+        || !Array.isArray(detail.caller_requests) || !detail.caller_requests.length
+        || !Array.isArray(detail.agent_actions) || !detail.agent_actions.length
+        || !Array.isArray(detail.data_sources) || !detail.data_sources.length
+        || !Array.isArray(detail.information_to_collect) || !detail.information_to_collect.length
+        || !["informational", "transactional", "both"].includes(String(detail.mode || "").trim().toLowerCase())
+        || !String(detail.completion_outcome || "").trim()
+        || !String(detail.escalation || "").trim()
+        || !String(detail.out_of_scope || "").trim();
+    });
+    const generatedQuestions = [
+      ...(!clientName ? ["What should the new client be called?"] : []),
+      ...(!industry ? ["Which industry should the client belong to?"] : []),
+      ...(!intents.length ? ["Which caller intents should this agent handle?"] : []),
+      ...incompleteIntents.slice(0, 2).map((intent: string) =>
+        `For ${intent.replace(/_/g, " ")}, what may callers ask, what should the agent do, which data source should it use, how should it finish, when should it escalate, and what is outside scope?`
+      ),
+      ...(!assistantName || !tone ? ["What should the assistant be called, and what tone should it use?"] : []),
+    ];
+    if (!draft || !clientName || !industry || !assistantName || !tone || !intents.length || incompleteIntents.length) {
       result.kind = "question";
       result.client_draft = null;
-      result.reply = "I have not created a client yet. I still need the client name and industry before I can prepare the creation form.";
-      result.questions = [
-        ...(!clientName ? ["What should the new client be called?"] : []),
-        ...(!industry ? ["Which industry should the client belong to?"] : []),
-      ];
+      result.reply = "I need to finish the service discovery before preparing this client. This prevents vague workflows and unsupported answers.";
+      result.questions = Array.from(new Set([...(result.questions || []), ...generatedQuestions])).slice(0, 5);
     } else {
       result.reply = `I have prepared a draft for ${clientName}. The client has not been created yet. Select Review & create client, check the details, then confirm Create Client.`;
     }
@@ -154,7 +180,15 @@ kind is one of question, diagnosis, workflow_draft, new_client_draft, guidance.
 Ask concise follow-up questions when business requirements are missing. Ask no more than 5 at once.
 For workflow_draft, return the COMPLETE updated client config in proposed_config. Preserve unrelated configuration exactly.
 Workflow shape: workflows.<intent>.nodes[] and edges[]. Nodes have id, type, data, position. Prompt/input nodes use data.promptKey and optional captureVariable. Action nodes use data.actionType/actionConfig. Every promptKey must exist in prompts. Every edge endpoint must exist. Add the intent to intents.
-For new_client_draft, client_draft may contain industry, client_name, brand_name, assistant_name, opening_hours, brand_phone, language, tone, tts_provider, voice id/name, intents and a short requirements summary. Ask questions first unless name, industry, purpose/intents, assistant identity and tone are known.
+For a new client, conduct discovery before returning new_client_draft. Do not infer missing business behavior. Ask up to 5 related questions at a time and adapt later questions to earlier answers.
+Discovery sequence:
+1. Establish client/brand, industry, assistant identity, language and tone.
+2. Ask which distinct caller intents the agent must handle. Use specific names such as product_information, place_order, stock_availability, store_information, returns, delivery_status or escalation rather than one broad sales intent.
+3. For EACH intent ask: examples of caller requests; products/services/categories involved; information to collect; exact agent actions; whether it is informational or transactional; successful completion outcome; escalation/handoff rule; and explicit out-of-scope boundary.
+4. Ask what data supports EACH intent: static prompts, uploaded knowledge base, website/search index, product catalogue, stock/store/order/customer database, external API, or none. Ask whether access is read-only or may create/update records. Never request credentials in chat.
+5. Ask operational policy: authentication/identity checks, consent/compliance wording, opening hours, human handoff destination, failure behavior and unsupported-request wording.
+For clothing retail, specifically distinguish product/style/size guidance, catalogue information, live stock by store/size/colour, store details, order placement, delivery/order status, returns/exchanges and promotions. Ask which are required; do not assume all of them.
+Only return new_client_draft once discovery is sufficient. It MUST contain intents and intent_requirements keyed by normalized intent. Every intent requirement must contain non-empty caller_requests[], information_to_collect[] (use ["none"] when appropriate), agent_actions[], data_sources[] (use ["none"] when appropriate), mode (informational, transactional or both), completion_outcome, escalation, and out_of_scope. It may also contain requirements_summary, integration_requirements and scope_guardrails.
 For diagnosis, explain concrete faults and repairs using the supplied deterministic diagnostics.
 Do not modify phone routing, credentials, database credentials, authentication, or users.`;
 
