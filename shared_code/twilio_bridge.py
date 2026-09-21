@@ -17,6 +17,7 @@ from shared_code.voice.turn_detection import (
     build_typing_ulaw,
 )
 from shared_code.voice.conversation_runtime import ConversationRuntime, TurnToken
+from shared_code.voice.name_resolution import resolve_recognition_candidates
 
 logger = logging.getLogger("twilio-bridge")
 
@@ -549,6 +550,21 @@ class TwilioBridge:
                     logger.info(f"User said: {text}")
                 if alternatives:
                     logger.info("STT alternatives: %s", alternatives)
+                if self._expecting_name:
+                    resolved_name = resolve_recognition_candidates(
+                        alternatives or [{"text": text, "confidence": confidence or 0.0}]
+                    )
+                    if resolved_name:
+                        text, resolved_confidence = resolved_name
+                        confidence = max(
+                            resolved_confidence,
+                            self.min_name_confidence,
+                        )
+                        logger.info(
+                            "Resolved name candidates to %r (effective confidence=%.2f)",
+                            text,
+                            confidence,
+                        )
                 if self._emit_sim_events and hasattr(self, "loop"):
                     asyncio.run_coroutine_threadsafe(
                         self._send_sim_event("transcript", text=text, confidence=confidence),
@@ -690,7 +706,11 @@ class TwilioBridge:
                 if self._last_user_speech_at >= self._last_prompt_at:
                     return
                 self._no_response_reprompts += 1
-                await self._speak_prompt("Sorry, I didn't catch that. Could you repeat that?")
+                if self._expecting_name:
+                    reprompt = "Take your time. What name would you like me to use?"
+                else:
+                    reprompt = "Sorry, I didn't catch that. Could you repeat that?"
+                await self._speak_prompt(reprompt)
                 self._schedule_no_response_reprompt()
             except asyncio.CancelledError:
                 return

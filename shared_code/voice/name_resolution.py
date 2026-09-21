@@ -60,3 +60,25 @@ def resolve_person_name(value: str) -> Optional[str]:
     resolved.extend(word.capitalize() for word in words[1:])
     return " ".join(resolved)
 
+
+def resolve_recognition_candidates(candidates: list[dict]) -> Optional[tuple[str, float]]:
+    """Combine N-best speech guesses by the real name they most likely represent."""
+    scores: dict[str, float] = {}
+    peak_confidence: dict[str, float] = {}
+    for candidate in candidates or []:
+        raw = re.sub(r"[.!?,;:]+$", "", str(candidate.get("text") or "").strip())
+        if not raw or len(raw.split()) > 3:
+            continue
+        resolved = resolve_person_name(raw)
+        if not resolved:
+            continue
+        confidence = max(0.0, float(candidate.get("confidence") or 0.0))
+        scores[resolved] = scores.get(resolved, 0.0) + confidence
+        peak_confidence[resolved] = max(peak_confidence.get(resolved, 0.0), confidence)
+    if not scores:
+        return None
+    ranked = sorted(scores, key=lambda name: scores[name], reverse=True)
+    if len(ranked) > 1 and scores[ranked[0]] - scores[ranked[1]] < 0.03:
+        return None
+    selected = ranked[0]
+    return selected, peak_confidence[selected]
