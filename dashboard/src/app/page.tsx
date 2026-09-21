@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type DragEvent } from "react";
-import { Save, Plus, History, LogOut, Settings, ChevronDown, ChevronRight } from "lucide-react";
+import { Save, Plus, History, LogOut, Settings, ChevronDown, ChevronRight, RefreshCw } from "lucide-react";
 import PromptEditor from "@/components/PromptEditor";
 import WorkflowVisualizer from "@/components/WorkflowVisualizer";
 import ClientConfigForm from "@/components/ClientConfigForm";
@@ -69,6 +69,11 @@ type LeftEditorTab = "none" | "prompts" | "config" | "json" | "phone_routing";
 type SimCallLog = {
   ts: string;
   message: string;
+};
+
+type AudioInputDevice = {
+  deviceId: string;
+  label: string;
 };
 
 type CallTraceEntry = {
@@ -164,6 +169,8 @@ export default function Home() {
   const [simulateCallOpen, setSimulateCallOpen] = useState(false);
   const [isSimulatingCall, setIsSimulatingCall] = useState(false);
   const [simCallLogs, setSimCallLogs] = useState<SimCallLog[]>([]);
+  const [audioInputDevices, setAudioInputDevices] = useState<AudioInputDevice[]>([]);
+  const [simAudioInputDeviceId, setSimAudioInputDeviceId] = useState("");
   const [callTraceOpen, setCallTraceOpen] = useState(false);
   const [callTraces, setCallTraces] = useState<CallTraceEntry[]>([]);
   const [isLoadingCallTraces, setIsLoadingCallTraces] = useState(false);
@@ -1021,6 +1028,26 @@ export default function Home() {
     setSimCallLogs((prev) => [...prev.slice(-79), { ts, message }]);
   };
 
+  const refreshAudioInputDevices = async () => {
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const inputs = devices
+        .filter((device) => device.kind === "audioinput")
+        .map((device, index) => ({
+          deviceId: device.deviceId,
+          label: device.label || `Microphone ${index + 1}`,
+        }));
+      setAudioInputDevices(inputs);
+      if (inputs.length && !inputs.some((device) => device.deviceId === simAudioInputDeviceId)) {
+        setSimAudioInputDeviceId(inputs[0].deviceId);
+      }
+      return inputs;
+    } catch {
+      setAudioInputDevices([]);
+      return [];
+    }
+  };
+
   const base64FromBytes = (bytes: Uint8Array) => {
     let binary = "";
     const chunkSize = 0x8000;
@@ -1171,6 +1198,7 @@ export default function Home() {
       addSimLog("Requesting microphone access...");
       const mediaStream = await navigator.mediaDevices.getUserMedia({
         audio: {
+          deviceId: simAudioInputDeviceId ? { exact: simAudioInputDeviceId } : undefined,
           channelCount: 1,
           echoCancellation: true,
           noiseSuppression: true,
@@ -1180,6 +1208,12 @@ export default function Home() {
       simMediaStreamRef.current = mediaStream;
       const microphoneTrack = mediaStream.getAudioTracks()[0];
       addSimLog(`Microphone: ${microphoneTrack?.label || "default input"}`);
+      addSimLog(
+        `Microphone track: ${microphoneTrack?.readyState || "unknown"}, ${microphoneTrack?.enabled ? "enabled" : "disabled"}${microphoneTrack?.muted ? ", muted" : ""}`
+      );
+      microphoneTrack?.addEventListener("mute", () => addSimLog("Microphone was muted by the browser or operating system"));
+      microphoneTrack?.addEventListener("unmute", () => addSimLog("Microphone unmuted"));
+      void refreshAudioInputDevices();
 
       const audioContext = new AudioContext({ sampleRate: 48000 });
       simAudioContextRef.current = audioContext;
@@ -1344,7 +1378,7 @@ export default function Home() {
         if (!simMicActiveLoggedRef.current) {
           addSimLog("No microphone audio detected. Check the selected input device and browser microphone level.");
         }
-      }, 5000);
+      }, 12000);
       addSimLog("Streaming microphone audio to agent");
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Failed to start simulation";
@@ -1828,6 +1862,7 @@ export default function Home() {
                             onClick={() => {
                               setTestingMenuOpen(false);
                               setSimulateCallOpen(true);
+                              void refreshAudioInputDevices();
                             }}
                             className="w-full text-left px-3 py-2 text-sm text-gray-300 hover:bg-gray-700 hover:text-white"
                           >
@@ -2538,6 +2573,29 @@ export default function Home() {
                 onChange={(e) => setTestCallWebhookBaseUrl(e.target.value)}
                 disabled={isSimulatingCall}
               />
+              <div className="flex gap-2">
+                <select
+                  value={simAudioInputDeviceId}
+                  onChange={(event) => setSimAudioInputDeviceId(event.target.value)}
+                  disabled={isSimulatingCall}
+                  className="min-w-0 flex-1 bg-gray-900 border border-gray-600 rounded p-2 text-sm text-white"
+                  aria-label="Microphone input"
+                >
+                  <option value="">Default microphone</option>
+                  {audioInputDevices.map((device) => (
+                    <option key={device.deviceId} value={device.deviceId}>{device.label}</option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={() => void refreshAudioInputDevices()}
+                  disabled={isSimulatingCall}
+                  className="w-9 h-9 inline-flex items-center justify-center rounded border border-gray-600 text-gray-300 hover:text-white hover:bg-gray-700 disabled:opacity-50"
+                  title="Refresh microphone list"
+                >
+                  <RefreshCw size={15} />
+                </button>
+              </div>
               <div className="text-[11px] text-gray-500">
                 Uses your microphone and routes directly to the selected workflow in test mode.
               </div>
