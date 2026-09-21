@@ -1,4 +1,5 @@
 import os
+import re
 from shared_code.routing.intent_router import detect_intent
 from shared_code.agent.workflow_router import route_to_workflow
 from shared_code.utils.session import load_session, save_session
@@ -74,35 +75,21 @@ def _result(prompt: str, session: dict, config: dict) -> dict:
 
 
 def _extract_name_smartly(text: str) -> str:
-    """
-    Extracts just the name from a sentence using LLM.
-    Returns None if no name found.
-    """
-    from shared_code.llm.aoai_client import chat_completion
-    
+    """Extract a caller name locally; name capture should not require an LLM round trip."""
     if not text or not text.strip():
         return None
-
-    system_prompt = (
-        "You are a strict name extractor. "
-        "Extract the person's name from the text. "
-        "1. If the text is just a greeting (e.g. 'Hello', 'Hi', 'Good morning'), return NOTHING. "
-        "2. If the text is a confirmation (e.g. 'Yeah', 'Okay', 'Sure', 'Yes'), return NOTHING. "
-        "3. If the input is ambiguous or could be a common noun, return NOTHING. "
-        "4. Only return a name if you are confident it is a proper noun referring to the user. "
-        "5. If the text is 'My name is Kim', return 'Kim'. "
-        "Return ONLY the name. No punctuation. If none found, return NOTHING."
-    )
-    
-    response = chat_completion([
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": text}
-    ])
-    
-    if not response:
+    cleaned = re.sub(r"[.!?,;:]+$", "", str(text).strip())
+    cleaned = re.sub(
+        r"^(?:my name is|the name is|it's|it is|i'm|i am|this is)\s+",
+        "",
+        cleaned,
+        flags=re.IGNORECASE,
+    ).strip()
+    if not re.fullmatch(r"[A-Za-z][A-Za-z' -]{1,60}", cleaned):
         return None
-        
-    cleaned = response.strip().replace(".", "")
+    words = cleaned.split()
+    if not 1 <= len(words) <= 3:
+        return None
     banned = {
         "hello", "hi", "hey", "nothing", "none",
         "there", "here", "someone", "anyone", "unknown",
@@ -111,5 +98,4 @@ def _extract_name_smartly(text: str) -> str:
     }
     if len(cleaned) < 2 or cleaned.lower() in banned:
         return None
-        
-    return cleaned
+    return " ".join(word.capitalize() for word in words)

@@ -512,6 +512,10 @@ def _process_node(
             if action_result.get("prompt"):
                 # If a direct prompt is returned, stop traversal and reply immediately
                 next_node_id = action_result.get("next_node_id")
+                if action_result.get("retry_input"):
+                    incoming = [e for e in edges if e.get("target") == node_id]
+                    if incoming:
+                        next_node_id = incoming[0].get("source")
                 session["current_node_id"] = next_node_id if isinstance(next_node_id, str) and next_node_id else None
                 save_session(session_id, session)
                 return {"prompt": action_result["prompt"], "session": session, "config": config}
@@ -830,6 +834,14 @@ def _execute_action(node: dict, session: dict, config: dict):
             print(f"DEBUG: ExtractName action found: {name}", flush=True)
         elif name:
             print(f"DEBUG: ExtractName action discarded invalid name: {name}", flush=True)
+        else:
+            retries = int(session.get("_name_retry") or 0) + 1
+            session["_name_retry"] = retries
+            retry_prompt = (
+                _get_prompt_template(config, "ask_name_retry")
+                or "Sorry, I didn't catch your name. Could you say it again?"
+            )
+            return {"prompt": retry_prompt, "retry_input": True}
 
     elif action_type == 'detect_intent':
         forced_intent = session.pop("_forced_intent", None)

@@ -87,6 +87,7 @@ class TwilioBridge:
         self._progress_active = False
         self.noise_mode = _to_bool(os.getenv("AZURE_STT_NOISE_MODE", "1"))
         self.min_stt_confidence = float(os.getenv("AZURE_STT_MIN_CONFIDENCE", "0.45"))
+        self.min_name_confidence = float(os.getenv("AZURE_STT_NAME_MIN_CONFIDENCE", "0.18"))
         self._echo_guard_ms = int(os.getenv("AZURE_STT_ECHO_GUARD_MS", "900"))
         self._post_tts_guard_until = 0.0
         self._clarify_prompt = "Sorry, I caught background noise there. Could you repeat that briefly?"
@@ -620,8 +621,9 @@ class TwilioBridge:
             return True
         tokens = [t for t in cleaned.split() if t]
         if self._expecting_name and len(tokens) == 1 and re.fullmatch(r"[a-z][a-z' -]{1,30}", tokens[0]):
-            # During name capture, accept a plausible single-token name even with lower confidence.
-            return False
+            # Short names score lower than sentences, but extremely weak guesses
+            # such as 0.06 must not advance the workflow.
+            return confidence is not None and confidence < self.min_name_confidence
         if confidence is not None and confidence < self.min_stt_confidence:
             return True
         if not tokens:

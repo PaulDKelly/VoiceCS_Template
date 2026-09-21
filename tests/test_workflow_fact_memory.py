@@ -47,3 +47,22 @@ class WorkflowFactMemoryTests(unittest.TestCase):
 
         self.assertEqual(result["prompt"], "Please confirm your name.")
 
+    def test_failed_name_action_returns_to_name_question(self):
+        nodes = [
+            {"id": "ask", "type": "custom", "data": {"promptKey": "greeting"}},
+            {"id": "extract", "type": "action", "data": {"actionType": "extract_name"}},
+            {"id": "intent", "type": "custom", "data": {"promptKey": "ask_intent"}},
+        ]
+        edges = [
+            {"source": "ask", "target": "extract"},
+            {"source": "extract", "target": "intent"},
+        ]
+        session = {"_last_user_input": "Okay", "intent": "first_response"}
+        config = {"prompts": {"ask_name_retry": "Please repeat your name."}}
+
+        with tempfile.TemporaryDirectory() as directory:
+            with patch("shared_code.utils.session.SESSION_DIR", Path(directory)):
+                result = _process_node("extract", nodes, edges, session, config, "retry-test")
+
+        self.assertEqual(result["prompt"], "Please repeat your name.")
+        self.assertEqual(result["session"]["current_node_id"], "ask")
