@@ -1219,6 +1219,25 @@ def _to_spoken_reference(value: str) -> str:
     return ", ".join(list(compact.upper()))
 
 
+def _to_spoken_currency(value: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return text
+
+    currency_patterns = (
+        (r"^\s*£\s*([\d,]+(?:\.\d{1,2})?)\s*$", r"\1 pounds"),
+        (r"^\s*\$\s*([\d,]+(?:\.\d{1,2})?)\s*$", r"\1 dollars"),
+        (r"^\s*€\s*([\d,]+(?:\.\d{1,2})?)\s*$", r"\1 euros"),
+        (r"^\s*([\d,]+(?:\.\d{1,2})?)\s*(?:lbs?\.?|gbp)\s*$", r"\1 pounds"),
+        (r"^\s*([\d,]+(?:\.\d{1,2})?)\s*usd\s*$", r"\1 dollars"),
+        (r"^\s*([\d,]+(?:\.\d{1,2})?)\s*eur\s*$", r"\1 euros"),
+    )
+    for pattern, replacement in currency_patterns:
+        if re.fullmatch(pattern, text, flags=re.IGNORECASE):
+            return re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+    return text
+
+
 def _to_spoken_value(var_name: str, value: str) -> str:
     name = str(var_name or "").lower()
     text = str(value or "")
@@ -1230,6 +1249,8 @@ def _to_spoken_value(var_name: str, value: str) -> str:
         return _to_spoken_date(text)
     if any(k in name for k in ("postcode", "post_code", "zip")):
         return _to_spoken_postcode(text)
+    if any(k in name for k in ("budget", "price", "amount", "cost", "balance", "payment", "settlement", "figure")):
+        return _to_spoken_currency(text)
     if any(k in name for k in ("reference", "ref", "ticket", "case", "order", "id")):
         return _to_spoken_reference(text)
     return text
