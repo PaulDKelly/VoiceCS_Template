@@ -523,6 +523,9 @@ class TwilioBridge:
             self._pending_marks.clear()
 
     def _on_recognized(self, evt):
+        if not self._is_active:
+            logger.info("Ignoring final STT result after the stream stopped.")
+            return
         if evt.result.reason == speechsdk.ResultReason.RecognizedSpeech:
             text = evt.result.text
             if text:
@@ -778,7 +781,7 @@ class TwilioBridge:
     async def _run_agent_with_progress(self, text: str):
         work = asyncio.create_task(asyncio.to_thread(run_agent_step, self.session_id, text))
         progress = None
-        if text != "__start__" and self._progress_delay_s > 0:
+        if text != "__start__" and not self._expecting_name and self._progress_delay_s > 0:
             progress = asyncio.create_task(self._delayed_progress_feedback(work))
         try:
             return await work

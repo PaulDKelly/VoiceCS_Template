@@ -185,6 +185,7 @@ export default function Home() {
   const simProcessorNodeRef = useRef<ScriptProcessorNode | null>(null);
   const simGainNodeRef = useRef<GainNode | null>(null);
   const simNextPlaybackTimeRef = useRef<number>(0);
+  const simPlaybackSourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
   const simReceivedAudioRef = useRef<number>(0);
   const simSentAudioRef = useRef<number>(0);
   const simMicActiveLoggedRef = useRef(false);
@@ -1134,6 +1135,24 @@ export default function Home() {
     return wsUrl.toString();
   };
 
+  const clearSimPlayback = () => {
+    simPlaybackSourcesRef.current.forEach((source) => {
+      try {
+        source.stop();
+      } catch {
+        // The source may already have ended.
+      }
+      try {
+        source.disconnect();
+      } catch {
+        // Ignore cleanup failures.
+      }
+    });
+    simPlaybackSourcesRef.current.clear();
+    const ctx = simAudioContextRef.current;
+    simNextPlaybackTimeRef.current = ctx ? ctx.currentTime : 0;
+  };
+
   const stopSimulatedCall = (silent = false) => {
     try {
       if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
@@ -1150,6 +1169,7 @@ export default function Home() {
     }
     wsRef.current = null;
 
+    clearSimPlayback();
     try {
       simProcessorNodeRef.current?.disconnect();
       simSourceNodeRef.current?.disconnect();
@@ -1225,6 +1245,7 @@ export default function Home() {
       simSourceNodeRef.current = sourceNode;
       simProcessorNodeRef.current = processorNode;
       simGainNodeRef.current = gainNode;
+      gainNode.connect(audioContext.destination);
       addSimLog(`Audio context: ${audioContext.state}`);
 
       const workflow = selectedWorkflowKey || "first_response";
@@ -1295,9 +1316,7 @@ export default function Home() {
             return;
           }
           if (data.event === "clear") {
-            if (simAudioContextRef.current) {
-              simNextPlaybackTimeRef.current = simAudioContextRef.current.currentTime;
-            }
+            clearSimPlayback();
             return;
           }
           if (data.event !== "media" || !data.media?.payload || !simAudioContextRef.current) return;
@@ -1317,9 +1336,15 @@ export default function Home() {
           const src = ctx.createBufferSource();
           src.buffer = buffer;
           src.connect(simGainNodeRef.current || ctx.destination);
-          if (simGainNodeRef.current) {
-            simGainNodeRef.current.connect(ctx.destination);
-          }
+          simPlaybackSourcesRef.current.add(src);
+          src.onended = () => {
+            simPlaybackSourcesRef.current.delete(src);
+            try {
+              src.disconnect();
+            } catch {
+              // Ignore cleanup failures.
+            }
+          };
 
           const now = ctx.currentTime;
           const startAt = Math.max(simNextPlaybackTimeRef.current || now, now + 0.01);
