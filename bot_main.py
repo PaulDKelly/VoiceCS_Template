@@ -22,6 +22,7 @@ from azure.eventgrid import EventGridEvent, SystemEventNames
 from bot_adapter import VoiceAgentBot
 from realtime_bridge import RealtimeVoiceBridge
 from twilio.twiml.voice_response import VoiceResponse, Connect, Stream
+from shared_code.kira_web_api import register_kira_routes
 
 # Configure logging
 logging.basicConfig(
@@ -688,6 +689,7 @@ app.router.add_post("/api/callbacks/incomingCall", incoming_call_handler)
 app.router.add_options("/api/callbacks/incomingCall", incoming_call_handler)
 app.router.add_post("/api/callbacks/callEvents", call_events_handler)
 app.router.add_get("/api/audio", audio_websocket_handler)
+register_kira_routes(app)
 
 # Log all requests
 @web.middleware

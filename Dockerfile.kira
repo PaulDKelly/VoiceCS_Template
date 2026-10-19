@@ -1,0 +1,12 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY kira_api_main.py .
+COPY shared_code ./shared_code
+
+ENV PORT=8000
+EXPOSE 8000
+CMD ["python", "kira_api_main.py"]
